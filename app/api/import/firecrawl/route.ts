@@ -65,7 +65,6 @@ export async function POST(request: Request) {
         // Better defaults when survey content may contain personal data:
         maxAge: 0,
         storeInCache: false,
-        zeroDataRetention: true,
       }),
       signal: AbortSignal.timeout(55_000),
     }
