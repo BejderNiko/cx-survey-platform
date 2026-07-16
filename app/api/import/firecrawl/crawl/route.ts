@@ -1,4 +1,4 @@
-const ALLOWED_DOMAINS = ["lyssna.com", "nps.today", "preely.com"];
+const ALLOWED_DOMAINS = ["lyssna.com", "nps.today", "preely.com", "ibm.com"];
 
 function isAllowedDomain(hostname: string) {
   const normalized = hostname.toLowerCase().replace(/\.$/, "");
@@ -81,7 +81,7 @@ export async function POST(request: Request) {
         url: target.href,
         limit,
         sitemap: "include",
-        crawlEntireDomain: true,
+        crawlEntireDomain: false,
         allowExternalLinks: false,
         allowSubdomains: false,
         ignoreQueryParameters: true,
