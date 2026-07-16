@@ -1,4 +1,4 @@
-const ALLOWED_DOMAINS = ["lyssna.com", "nps.today"];
+const ALLOWED_DOMAINS = ["lyssna.com", "nps.today", "preely.com"];
 
 function isAllowedDomain(hostname: string) {
   const normalized = hostname.toLowerCase().replace(/\.$/, "");
