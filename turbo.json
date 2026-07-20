@@ -3,6 +3,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
+      "env": ["SESSION_SECRET"],
       "outputs": [".next/**", "!.next/cache/**", "dist/**"]
     },
     "dev": {
@@ -10,7 +11,11 @@
       "persistent": true
     },
     "lint": {},
-    "typecheck": {"dependsOn": ["^typecheck"]},
-    "test": {"dependsOn": ["^build"]}
+    "typecheck": {
+      "dependsOn": ["^typecheck"]
+    },
+    "test": {
+      "dependsOn": ["^build"]
+    }
   }
 }
