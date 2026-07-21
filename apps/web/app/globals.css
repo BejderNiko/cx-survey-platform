@@ -1,0 +1,54 @@
+﻿@import "tailwindcss";
+
+/*
+ * OK CX platform design tokens.
+ * Neutral, replaceable tokens â€” no invented OK brand rules. Swap the accent
+ * values when official OK design tokens are provided.
+ */
+:root {
+  --background: #f6f7f8;
+  --surface: #ffffff;
+  --foreground: #16181d;
+  --muted: #5b6472;
+  --border: #e3e6ea;
+  --accent: #0f6b66;
+  --accent-hover: #0c5450;
+  --accent-soft: #e3f0ef;
+  --danger: #b3372e;
+  --warning: #9a6b0c;
+  --success: #1a7f4f;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-line: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+  --color-success: var(--success);
+  --font-sans: "Segoe UI";
+  --font-mono: "Cascadia Mono";
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 14px;
+}
+
+/* Visible focus for keyboard navigation across the app. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+@media print {
+  nav, header.app-topbar { display: none; }
+}

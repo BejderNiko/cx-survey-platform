@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Authoritative database gate: native PostgreSQL via scripts/dev-db.sh.
+      # Local development uses PGlite (scripts/dev-db.mjs); CI intentionally
+      # does NOT — these variables pin the native engine and database name.
+      LOCAL_DATABASE_ENGINE: native
+      DATABASE_URL: postgres://cx_app@127.0.0.1:54329/cx_platform
+      DATABASE_ADMIN_URL: postgres://postgres@127.0.0.1:54329/cx_platform
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm --filter @ok/domain test
+      - name: Verify production build
+        env:
+          SESSION_SECRET: ci-only-build-secret-not-for-runtime
+        run: pnpm --filter @ok/web build
+      # Database-backed tests (RLS tenant isolation) against native PostgreSQL —
+      # the authoritative validation of real login roles and RLS behavior.
+      # (PGlite is a local-development convenience only and is never used here.)
+      - name: Init native PostgreSQL (authoritative DB gate) and seed
+        run: |
+          sudo systemctl stop postgresql || true
+          PGBIN=$(ls -d /usr/lib/postgresql/*/bin | tail -1) scripts/dev-db.sh init
+          pnpm seed
+      - run: pnpm --filter @ok/web test
+
+  analytics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: '3.12'
+          working-directory: apps/analytics
+      - name: Run pytest (numerical fixtures + export round-trips)
+        working-directory: apps/analytics
+        run: |
+          uv sync --frozen
+          uv run pytest -q
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [web]
+    env:
+      ANALYTICS_API_SECRET: ci-only-analytics-secret
+      APP_ENV: staging
+      # E2E also runs on the authoritative native PostgreSQL engine, not PGlite.
+      LOCAL_DATABASE_ENGINE: native
+      DATABASE_URL: postgres://cx_app@127.0.0.1:54329/cx_platform
+      DATABASE_ADMIN_URL: postgres://postgres@127.0.0.1:54329/cx_platform
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: '3.12'
+          working-directory: apps/analytics
+      - run: pnpm install --frozen-lockfile
+      - name: Init native PostgreSQL (authoritative DB gate) and seed
+        run: |
+          sudo systemctl stop postgresql || true
+          PGBIN=$(ls -d /usr/lib/postgresql/*/bin | tail -1) scripts/dev-db.sh init
+          pnpm seed
+      - name: Start analytics service
+        working-directory: apps/analytics
+        run: |
+          uv sync --frozen
+          nohup uv run uvicorn ok_analytics.main:app --port 8000 &
+      - name: Install Playwright Chromium
+        working-directory: apps/web
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: ""
+        run: pnpm exec playwright install chromium --with-deps
+      - name: Run Playwright smoke suite
+        working-directory: apps/web
+        run: pnpm test:e2e
