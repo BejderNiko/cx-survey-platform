@@ -28,7 +28,7 @@ build-backend = "hatchling.build"
 packages = ["src/ok_analytics"]
 
 [tool.vercel]
-entrypoint = "ok_analytics.main:app"
+entrypoint = "main:app"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
