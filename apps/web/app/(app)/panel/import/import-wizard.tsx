@@ -3,6 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { Badge, Button, Card, Select, Table, Td, Th } from "@/components/ui";
 import { TARGET_FIELDS } from "@/lib/import/validate";
+import { IMPORT_STATUS, label } from "@/lib/labels";
 import { commitStep, dryRunStep, parseStep } from "./actions";
 
 type ParseResult = Awaited<ReturnType<typeof parseStep>>;
@@ -38,11 +39,9 @@ const AUTO_MAP: Record<string, string> = {
 export function ImportWizard({
   attributeFields,
   history,
-  locale,
 }: {
   attributeFields: { key: string; label: string }[];
   history: Batch[];
-  locale: string;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -75,20 +74,20 @@ export function ImportWizard({
   }
 
   const targetOptions = [
-    { value: "", label: "— skip —" },
+    { value: "", label: "— spring over —" },
     ...TARGET_FIELDS.map((f) => ({ value: f, label: f })),
-    ...attributeFields.map((a) => ({ value: `attr:${a.key}`, label: `attribute: ${a.label}` })),
+    ...attributeFields.map((a) => ({ value: `attr:${a.key}`, label: `attribut: ${a.label}` })),
   ];
 
   return (
     <div className="space-y-4">
-      <Card title="1 · Upload file">
+      <Card title="1 · Upload fil">
         <div className="flex flex-wrap items-center gap-3">
           <input
             ref={fileRef}
             type="file"
             accept=".csv,.xlsx"
-            aria-label="Import file"
+            aria-label="Importfil"
             className="text-sm"
             onChange={(e) => {
               setFile(e.target.files?.[0] ?? null);
@@ -108,18 +107,18 @@ export function ImportWizard({
                   setParsed(res);
                   autoMap(res.columns);
                 } catch (e) {
-                  setError(e instanceof Error ? e.message : "Could not parse the file.");
+                  setError(e instanceof Error ? e.message : "Filen kunne ikke indlæses.");
                 }
               })
             }
           >
-            Parse & preview
+            Indlæs og forhåndsvis
           </Button>
           {parsed && (
             <span className="text-sm text-muted">
-              {parsed.rowCount} rows · {parsed.columns.length} columns
-              {parsed.delimiter ? ` · delimiter '${parsed.delimiter}'` : ""}
-              {parsed.sheetNames ? ` · sheet ${parsed.sheetNames[0]}` : ""}
+              {parsed.rowCount} rækker · {parsed.columns.length} kolonner
+              {parsed.delimiter ? ` · separator '${parsed.delimiter}'` : ""}
+              {parsed.sheetNames ? ` · ark ${parsed.sheetNames[0]}` : ""}
             </span>
           )}
         </div>
@@ -145,13 +144,13 @@ export function ImportWizard({
       </Card>
 
       {parsed && (
-        <Card title="2 · Map columns & rules">
+        <Card title="2 · Tilknyt kolonner og regler">
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {parsed.columns.map((c) => (
               <div key={c} className="flex items-center gap-2">
                 <span className="w-36 truncate text-sm" title={c}>{c}</span>
                 <Select
-                  aria-label={`Mapping for ${c}`}
+                  aria-label={`Tilknytning for ${c}`}
                   value={mapping[c] ?? ""}
                   onChange={(e) => setMapping((m) => ({ ...m, [c]: e.target.value }))}
                   className="flex-1"
@@ -163,11 +162,11 @@ export function ImportWizard({
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-4">
             <label className="flex items-center gap-2 text-sm">
-              Deduplicate by
-              <Select aria-label="Deduplication rule" value={dedupRule} onChange={(e) => setDedupRule(e.target.value)}>
-                <option value="external_id">external_id (update existing)</option>
-                <option value="email">email (update existing)</option>
-                <option value="none">none (always create)</option>
+              Fjern dubletter efter
+              <Select aria-label="Dubletregel" value={dedupRule} onChange={(e) => setDedupRule(e.target.value)}>
+                <option value="external_id">eksternt id (opdatér eksisterende)</option>
+                <option value="email">e-mail (opdatér eksisterende)</option>
+                <option value="none">ingen (opret altid)</option>
               </Select>
             </label>
             <label className="flex items-center gap-2 text-sm">
@@ -176,14 +175,14 @@ export function ImportWizard({
                 checked={consentConfirmed}
                 onChange={(e) => setConsentConfirmed(e.target.checked)}
               />
-              I confirm these contacts have a valid consent basis for survey contact
+              Jeg bekræfter, at kontakterne har et gyldigt samtykkegrundlag til undersøgelseskontakt
             </label>
           </div>
         </Card>
       )}
 
       {parsed && (
-        <Card title="3 · Dry run">
+        <Card title="3 · Prøvekørsel">
           <div className="flex items-center gap-3">
             <Button
               disabled={pending || !consentConfirmed}
@@ -193,29 +192,29 @@ export function ImportWizard({
                   try {
                     setDryRun(await dryRunStep(buildForm()));
                   } catch (e) {
-                    setError(e instanceof Error ? e.message : "Dry run failed.");
+                    setError(e instanceof Error ? e.message : "Prøvekørslen fejlede.");
                   }
                 })
               }
             >
-              Run dry run
+              Kør prøvekørsel
             </Button>
-            {!consentConfirmed && <span className="text-xs text-muted">Confirm the consent basis first.</span>}
+            {!consentConfirmed && <span className="text-xs text-muted">Bekræft først samtykkegrundlaget.</span>}
           </div>
           {dryRun && (
             <div className="mt-3 space-y-2">
               <div className="flex flex-wrap gap-2">
-                <Badge tone="gray">total {dryRun.counts.total}</Badge>
-                <Badge tone="green">valid {dryRun.counts.valid}</Badge>
-                <Badge tone="blue">create {dryRun.counts.create}</Badge>
-                <Badge tone="amber">update {dryRun.counts.update}</Badge>
-                <Badge tone="red">invalid {dryRun.counts.invalid}</Badge>
-                <Badge tone="red">file duplicates {dryRun.counts.skippedDuplicates}</Badge>
+                <Badge tone="gray">i alt {dryRun.counts.total}</Badge>
+                <Badge tone="green">gyldige {dryRun.counts.valid}</Badge>
+                <Badge tone="blue">oprettes {dryRun.counts.create}</Badge>
+                <Badge tone="amber">opdateres {dryRun.counts.update}</Badge>
+                <Badge tone="red">ugyldige {dryRun.counts.invalid}</Badge>
+                <Badge tone="red">dubletter i filen {dryRun.counts.skippedDuplicates}</Badge>
               </div>
               {dryRun.errors.length > 0 && (
-                <div className="max-h-48 overflow-y-auto rounded-md border border-line">
+                <div className="max-h-48 overflow-y-auto rounded-lg border border-line">
                   <Table>
-                    <thead><tr><Th>Row</Th><Th>Column</Th><Th>Problem</Th></tr></thead>
+                    <thead><tr><Th>Række</Th><Th>Kolonne</Th><Th>Problem</Th></tr></thead>
                     <tbody>
                       {dryRun.errors.map((e, i) => (
                         <tr key={i}>
@@ -234,7 +233,7 @@ export function ImportWizard({
       )}
 
       {dryRun && (
-        <Card title="4 · Commit">
+        <Card title="4 · Gennemfør">
           <div className="flex items-center gap-3">
             <Button
               disabled={pending || committed !== null || dryRun.counts.valid === 0}
@@ -244,19 +243,19 @@ export function ImportWizard({
                   try {
                     setCommitted(await commitStep(buildForm({ batchId: dryRun.batchId })));
                   } catch (e) {
-                    setError(e instanceof Error ? e.message : "Commit failed.");
+                    setError(e instanceof Error ? e.message : "Importen fejlede.");
                   }
                 })
               }
             >
-              Commit import
+              Gennemfør import
             </Button>
             {committed && (
               <span className="text-sm">
-                Imported: {committed.counts.create} created, {committed.counts.update} updated.{" "}
+                Importeret: {committed.counts.create} oprettet, {committed.counts.update} opdateret.{" "}
                 {committed.errorCount > 0 && (
                   <a className="text-accent underline" href={`/api/import-batches/${committed.batchId}/errors`}>
-                    Download error report ({committed.errorCount})
+                    Hent fejlrapport ({committed.errorCount})
                   </a>
                 )}
               </span>
@@ -265,33 +264,33 @@ export function ImportWizard({
         </Card>
       )}
 
-      <Card title="Import history">
+      <Card title="Importhistorik">
         <Table>
           <thead>
-            <tr><Th>File</Th><Th>Status</Th><Th>Counts</Th><Th>Errors</Th><Th>By</Th><Th>When</Th></tr>
+            <tr><Th>Fil</Th><Th>Status</Th><Th>Antal</Th><Th>Fejl</Th><Th>Af</Th><Th>Tidspunkt</Th></tr>
           </thead>
           <tbody>
             {history.map((b) => (
               <tr key={b.id}>
                 <Td>{b.filename}</Td>
-                <Td><Badge tone={b.status === "committed" ? "green" : b.status === "failed" ? "red" : "gray"}>{b.status}</Badge></Td>
+                <Td><Badge tone={b.status === "committed" ? "green" : b.status === "failed" ? "red" : "gray"}>{label(IMPORT_STATUS, b.status)}</Badge></Td>
                 <Td className="text-xs">
-                  {b.counts.create ?? 0} created · {b.counts.update ?? 0} updated · {b.counts.invalid ?? 0} invalid
+                  {b.counts.create ?? 0} oprettet · {b.counts.update ?? 0} opdateret · {b.counts.invalid ?? 0} ugyldige
                 </Td>
                 <Td>
                   {b.errorCount > 0 ? (
                     <a className="text-accent underline" href={`/api/import-batches/${b.id}/errors`}>
-                      {b.errorCount} rows
+                      {b.errorCount} rækker
                     </a>
                   ) : "0"}
                 </Td>
                 <Td>{b.author}</Td>
                 <Td className="whitespace-nowrap text-muted">
-                  {new Intl.DateTimeFormat(locale === "da" ? "da-DK" : "en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(b.createdAt))}
+                  {new Intl.DateTimeFormat("da-DK", { dateStyle: "medium", timeStyle: "short" }).format(new Date(b.createdAt))}
                 </Td>
               </tr>
             ))}
-            {history.length === 0 && <tr><Td colSpan={6} className="text-muted">No imports yet.</Td></tr>}
+            {history.length === 0 && <tr><Td colSpan={6} className="text-muted">Ingen importer endnu.</Td></tr>}
           </tbody>
         </Table>
       </Card>

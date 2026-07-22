@@ -11,6 +11,7 @@ import {
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { Badge, Button, Input, cn } from "@/components/ui";
+import { CUSTOMER_STATUS, LIFECYCLE, label } from "@/lib/labels";
 import { bulkTag } from "./actions";
 
 export interface PanelRow {
@@ -41,7 +42,7 @@ const LIFECYCLE_TONE: Record<string, string> = {
   archived: "gray",
 };
 
-export function PanelTable({ rows, canEdit, locale }: { rows: PanelRow[]; canEdit: boolean; locale: string }) {
+export function PanelTable({ rows, canEdit }: { rows: PanelRow[]; canEdit: boolean }) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [rowSelection, setRowSelection] = useState<Record<string, boolean>>({});
   const [tagName, setTagName] = useState("");
@@ -54,7 +55,7 @@ export function PanelTable({ rows, canEdit, locale }: { rows: PanelRow[]; canEdi
       header: ({ table }) => (
         <input
           type="checkbox"
-          aria-label="Select all"
+          aria-label="Vælg alle"
           checked={table.getIsAllRowsSelected()}
           onChange={table.getToggleAllRowsSelectedHandler()}
         />
@@ -62,33 +63,36 @@ export function PanelTable({ rows, canEdit, locale }: { rows: PanelRow[]; canEdi
       cell: ({ row }) => (
         <input
           type="checkbox"
-          aria-label={`Select ${row.original.name}`}
+          aria-label={`Vælg ${row.original.name}`}
           checked={row.getIsSelected()}
           onChange={row.getToggleSelectedHandler()}
         />
       ),
     }),
     col.accessor("name", {
-      header: "Name",
+      header: "Navn",
       cell: (info) => (
         <Link href={`/panel/${info.row.original.id}`} className="font-medium text-accent hover:underline">
           {info.getValue()}
         </Link>
       ),
     }),
-    col.accessor("email", { header: "Email" }),
+    col.accessor("email", { header: "E-mail" }),
     col.accessor("lifecycle", {
-      header: "Lifecycle",
-      cell: (info) => <Badge tone={LIFECYCLE_TONE[info.getValue()] ?? "gray"}>{info.getValue()}</Badge>,
+      header: "Livscyklus",
+      cell: (info) => <Badge tone={LIFECYCLE_TONE[info.getValue()] ?? "gray"}>{label(LIFECYCLE, info.getValue())}</Badge>,
     }),
     col.accessor("hasConsent", {
-      header: "Consent",
-      cell: (info) => (info.getValue() ? <Badge tone="green">granted</Badge> : <Badge tone="red">missing</Badge>),
+      header: "Samtykke",
+      cell: (info) => (info.getValue() ? <Badge tone="green">givet</Badge> : <Badge tone="red">mangler</Badge>),
     }),
-    col.accessor("customerStatus", { header: "Status" }),
-    col.accessor("city", { header: "City" }),
-    col.accessor("language", { header: "Lang" }),
-    col.accessor("birthYear", { header: "Born", cell: (info) => info.getValue() ?? "—" }),
+    col.accessor("customerStatus", {
+      header: "Kundestatus",
+      cell: (info) => label(CUSTOMER_STATUS, info.getValue()),
+    }),
+    col.accessor("city", { header: "By" }),
+    col.accessor("language", { header: "Sprog" }),
+    col.accessor("birthYear", { header: "Født", cell: (info) => info.getValue() ?? "—" }),
     col.accessor("tags", {
       header: "Tags",
       enableSorting: false,
@@ -118,11 +122,11 @@ export function PanelTable({ rows, canEdit, locale }: { rows: PanelRow[]; canEdi
   return (
     <div>
       {canEdit && selectedIds.length > 0 && (
-        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-line bg-accent-soft/60 px-3 py-2">
-          <span className="text-xs font-medium">{selectedIds.length} selected</span>
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-accent-soft/60 px-3 py-2">
+          <span className="text-xs font-medium">{selectedIds.length} valgt</span>
           <Input
-            aria-label="Tag name"
-            placeholder="tag name"
+            aria-label="Tagnavn"
+            placeholder="tagnavn"
             value={tagName}
             onChange={(e) => setTagName(e.target.value)}
             className="h-7 w-40 text-xs"
@@ -134,13 +138,13 @@ export function PanelTable({ rows, canEdit, locale }: { rows: PanelRow[]; canEdi
             onClick={() =>
               startTransition(async () => {
                 const res = await bulkTag(selectedIds, tagName);
-                setMessage(`Tagged ${res.tagged} panelists with '${tagName.trim().toLowerCase()}'.`);
+                setMessage(`${res.tagged} panelister fik tagget '${tagName.trim().toLowerCase()}'.`);
                 setRowSelection({});
                 setTagName("");
               })
             }
           >
-            Add tag
+            Tilføj tag
           </Button>
           {message && <span className="text-xs text-muted">{message}</span>}
         </div>
@@ -154,7 +158,7 @@ export function PanelTable({ rows, canEdit, locale }: { rows: PanelRow[]; canEdi
                   <th
                     key={h.id}
                     className={cn(
-                      "border-b border-line px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted whitespace-nowrap",
+                      "border-b border-line px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-muted whitespace-nowrap",
                       h.column.getCanSort() && "cursor-pointer select-none",
                     )}
                     onClick={h.column.getToggleSortingHandler()}
@@ -183,7 +187,7 @@ export function PanelTable({ rows, canEdit, locale }: { rows: PanelRow[]; canEdi
             {rows.length === 0 && (
               <tr>
                 <td colSpan={10} className="px-3 py-6 text-center text-muted">
-                  No panelists match the filters.
+                  Ingen panelister matcher filtrene.
                 </td>
               </tr>
             )}

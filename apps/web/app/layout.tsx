@@ -1,9 +1,9 @@
-﻿import type { Metadata } from "next";
+import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "OK CX Survey Platform",
-  description: "Internal survey, panel, CX, and analysis platform for OK",
+  title: "OK · CX-platform",
+  description: "OK's interne platform til panel, undersøgelser, kundeoplevelse og analyse",
 };
 
 export default function RootLayout({
@@ -12,7 +12,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full antialiased">
+    <html lang="da" className="h-full antialiased">
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );

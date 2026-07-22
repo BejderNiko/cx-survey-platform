@@ -2,6 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button, Input, Select } from "@/components/ui";
+import { CUSTOMER_STATUS, LIFECYCLE, label } from "@/lib/labels";
 
 const LIFECYCLES = ["", "active", "invited", "paused", "unsubscribed", "bounced", "blocked", "anonymized", "archived"];
 const STATUSES = ["", "customer", "former", "prospect"];
@@ -28,57 +29,57 @@ export function FilterBar({
   }
 
   return (
-    <form action={submit} className="flex flex-wrap items-end gap-2" role="search" aria-label="Filter panelists">
+    <form action={submit} className="flex flex-wrap items-end gap-2" role="search" aria-label="Filtrér panelister">
       <div className="w-56">
-        <label htmlFor="pf-q" className="mb-1 block text-xs font-medium text-muted">Search</label>
-        <Input id="pf-q" name="q" placeholder="Name, email, external ID" defaultValue={current.q ?? ""} />
+        <label htmlFor="pf-q" className="mb-1 block text-xs font-medium text-muted">Søg</label>
+        <Input id="pf-q" name="q" placeholder="Navn, e-mail, eksternt id" defaultValue={current.q ?? ""} />
       </div>
       <div>
-        <label htmlFor="pf-lifecycle" className="mb-1 block text-xs font-medium text-muted">Lifecycle</label>
+        <label htmlFor="pf-lifecycle" className="mb-1 block text-xs font-medium text-muted">Livscyklus</label>
         <Select id="pf-lifecycle" name="lifecycle" defaultValue={current.lifecycle ?? ""}>
-          {LIFECYCLES.map((l) => <option key={l} value={l}>{l || "All"}</option>)}
+          {LIFECYCLES.map((l) => <option key={l} value={l}>{l ? label(LIFECYCLE, l) : "Alle"}</option>)}
         </Select>
       </div>
       <div>
-        <label htmlFor="pf-status" className="mb-1 block text-xs font-medium text-muted">Customer status</label>
+        <label htmlFor="pf-status" className="mb-1 block text-xs font-medium text-muted">Kundestatus</label>
         <Select id="pf-status" name="status" defaultValue={current.status ?? ""}>
-          {STATUSES.map((s) => <option key={s} value={s}>{s || "All"}</option>)}
+          {STATUSES.map((s) => <option key={s} value={s}>{s ? label(CUSTOMER_STATUS, s) : "Alle"}</option>)}
         </Select>
       </div>
       <div>
         <label htmlFor="pf-tag" className="mb-1 block text-xs font-medium text-muted">Tag</label>
         <Select id="pf-tag" name="tag" defaultValue={current.tag ?? ""}>
-          <option value="">All</option>
+          <option value="">Alle</option>
           {tags.map((t) => <option key={t} value={t}>{t}</option>)}
         </Select>
       </div>
       <div>
-        <label htmlFor="pf-language" className="mb-1 block text-xs font-medium text-muted">Language</label>
+        <label htmlFor="pf-language" className="mb-1 block text-xs font-medium text-muted">Sprog</label>
         <Select id="pf-language" name="language" defaultValue={current.language ?? ""}>
-          <option value="">All</option>
-          <option value="da">da</option>
-          <option value="en">en</option>
+          <option value="">Alle</option>
+          <option value="da">dansk</option>
+          <option value="en">engelsk</option>
         </Select>
       </div>
       <div>
         <label htmlFor="pf-segment" className="mb-1 block text-xs font-medium text-muted">Segment</label>
         <Select id="pf-segment" name="segment" defaultValue={current.segment ?? ""}>
-          <option value="">None</option>
+          <option value="">Intet</option>
           {segments.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </Select>
       </div>
       <div>
-        <label htmlFor="pf-sort" className="mb-1 block text-xs font-medium text-muted">Sort</label>
+        <label htmlFor="pf-sort" className="mb-1 block text-xs font-medium text-muted">Sortering</label>
         <Select id="pf-sort" name="sort" defaultValue={current.sort ?? "name"}>
-          <option value="name">Name</option>
-          <option value="email">Email</option>
-          <option value="created">Newest</option>
+          <option value="name">Navn</option>
+          <option value="email">E-mail</option>
+          <option value="created">Nyeste</option>
         </Select>
       </div>
-      <Button type="submit" variant="secondary">Apply</Button>
+      <Button type="submit" variant="secondary">Anvend</Button>
       {searchParams.size > 0 && (
         <Button type="button" variant="ghost" onClick={() => router.push("/panel")}>
-          Clear
+          Nulstil
         </Button>
       )}
     </form>

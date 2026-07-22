@@ -121,7 +121,9 @@ export async function exportDatasetRemote(
 
 export async function analyticsHealth(): Promise<{ ok: boolean; procedures: string[]; versions: Record<string, string> }> {
   try {
-    const res = await call("/health/details", { method: "GET" });
+    // Kort timeout: sundhedstjekket må aldrig blokere sidevisningen mærkbart,
+    // når analysetjenesten er nede (standard-timeouten er 30 s).
+    const res = await call("/health/details", { method: "GET", signal: AbortSignal.timeout(1500) });
     const body = await res.json();
     return { ok: true, procedures: body.procedures ?? [], versions: body.library_versions ?? {} };
   } catch {

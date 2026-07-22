@@ -20,19 +20,19 @@ export function CreateStudyForm({
   return (
     <div className="flex flex-wrap items-end gap-3">
       <div className="w-64">
-        <Label htmlFor="cs-title">Title</Label>
-        <Input id="cs-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Transaktionel NPS — værksted" />
+        <Label htmlFor="cs-title">Titel</Label>
+        <Input id="cs-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="fx Transaktionel NPS — værksted" />
       </div>
       <div>
-        <Label htmlFor="cs-ws">Workspace</Label>
+        <Label htmlFor="cs-ws">Arbejdsområde</Label>
         <Select id="cs-ws" value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)}>
           {workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
         </Select>
       </div>
       <div>
-        <Label htmlFor="cs-tpl">Template</Label>
+        <Label htmlFor="cs-tpl">Skabelon</Label>
         <Select id="cs-tpl" value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
-          <option value="">Blank survey</option>
+          <option value="">Tomt spørgeskema</option>
           {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </Select>
       </div>
@@ -44,9 +44,9 @@ export function CreateStudyForm({
             try {
               await createStudy({ title, workspaceId, templateId: templateId || null });
             } catch (e) {
-              // redirect() throws internally; only surface real errors
+              // redirect() kaster internt; vis kun rigtige fejl
               if (e instanceof Error && !e.message.includes("NEXT_REDIRECT")) {
-                setError("Could not create the study.");
+                setError("Studiet kunne ikke oprettes.");
                 return;
               }
               throw e;
@@ -54,7 +54,7 @@ export function CreateStudyForm({
           })
         }
       >
-        Create & open builder
+        Opret og åbn builder
       </Button>
       {error && <span className="text-sm text-danger">{error}</span>}
     </div>

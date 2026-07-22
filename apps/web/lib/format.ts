@@ -1,29 +1,27 @@
-/** Locale-aware date/number formatting (da-DK / en-GB). */
+/** Dato- og talformatering. UI'et er kun på dansk, så alt formateres da-DK. */
 
-function intlLocale(locale: string): string {
-  return locale === "da" ? "da-DK" : "en-GB";
-}
+const LOCALE = "da-DK";
 
-export function fmtDate(value: string | Date | null | undefined, locale = "en"): string {
+export function fmtDate(value: string | Date | null | undefined): string {
   if (!value) return "—";
   const d = typeof value === "string" ? new Date(value) : value;
   if (Number.isNaN(d.getTime())) return "—";
-  return new Intl.DateTimeFormat(intlLocale(locale), { dateStyle: "medium" }).format(d);
+  return new Intl.DateTimeFormat(LOCALE, { dateStyle: "medium" }).format(d);
 }
 
-export function fmtDateTime(value: string | Date | null | undefined, locale = "en"): string {
+export function fmtDateTime(value: string | Date | null | undefined): string {
   if (!value) return "—";
   const d = typeof value === "string" ? new Date(value) : value;
   if (Number.isNaN(d.getTime())) return "—";
-  return new Intl.DateTimeFormat(intlLocale(locale), { dateStyle: "medium", timeStyle: "short" }).format(d);
+  return new Intl.DateTimeFormat(LOCALE, { dateStyle: "medium", timeStyle: "short" }).format(d);
 }
 
-export function fmtNumber(value: number | null | undefined, locale = "en", digits = 1): string {
+export function fmtNumber(value: number | null | undefined, digits = 1): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "—";
-  return new Intl.NumberFormat(intlLocale(locale), { maximumFractionDigits: digits }).format(value);
+  return new Intl.NumberFormat(LOCALE, { maximumFractionDigits: digits }).format(value);
 }
 
-export function fmtPercent(value: number | null | undefined, locale = "en", digits = 1): string {
+export function fmtPercent(value: number | null | undefined, digits = 1): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "—";
-  return `${fmtNumber(value, locale, digits)}%`;
+  return `${fmtNumber(value, digits)} %`;
 }

@@ -1,20 +1,17 @@
 import Link from "next/link";
 import { can } from "@ok/domain";
-import { Badge, Card, PageHeader, Table, Td, Th } from "@/components/ui";
+import { IconSearch, IconStudy } from "@/components/icons";
+import { Badge, Card, EmptyState, LinkButton, ListRow, StatusBadge } from "@/components/ui";
 import { requireSession } from "@/lib/auth";
 import { withUser } from "@/lib/db";
 import { fmtDate } from "@/lib/format";
+import { STUDY_STATUS, STUDY_STATUS_TONE, STUDY_TYPE, label } from "@/lib/labels";
 import { CreateStudyForm } from "./create-study-form";
-
-const STATUS_TONE: Record<string, string> = {
-  draft: "gray", review: "blue", scheduled: "blue", live: "green",
-  paused: "amber", closed: "amber", archived: "gray",
-};
 
 export default async function StudiesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; status?: string }>;
+  searchParams: Promise<{ q?: string; status?: string; ny?: string }>;
 }) {
   const session = await requireSession();
   const sp = await searchParams;
@@ -25,7 +22,8 @@ export default async function StudiesPage({
       select s.id, s.title, s.status, s.study_type, s.method_tags, s.updated_at,
              w.name as workspace, u.full_name as owner,
              (select count(*) from study_versions v where v.study_id = s.id) as versions,
-             (select count(*) from responses r where r.study_id = s.id and r.status = 'completed') as completed
+             (select count(*) from responses r where r.study_id = s.id and r.status = 'completed') as completed,
+             (select count(*) from distributions d where d.study_id = s.id) as distributions
       from studies s
       join workspaces w on w.id = s.workspace_id
       join users u on u.id = s.owner_id
@@ -38,16 +36,33 @@ export default async function StudiesPage({
   });
 
   const canCreate = can(session.role, "studies.create");
+  const showCreate = canCreate && sp.ny !== undefined;
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title="Studies"
-        description="Surveys and research studies with versioned instruments."
-      />
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="font-display text-2xl tracking-tight text-heading">Studier</h1>
+          <p className="mt-1 text-sm text-muted">
+            Undersøgelser, udsendelser og besvarelser — samlet ét sted.
+          </p>
+        </div>
+        {canCreate && !showCreate && (
+          <LinkButton href="/studies?ny=1" variant="primary">
+            + Opret studie
+          </LinkButton>
+        )}
+      </div>
 
-      {canCreate && (
-        <Card title="Create study">
+      {showCreate && (
+        <Card
+          title="Opret studie"
+          actions={
+            <Link href="/studies" className="text-xs text-muted hover:text-accent hover:underline">
+              Luk
+            </Link>
+          }
+        >
           <CreateStudyForm
             workspaces={data.workspaces.map((w) => ({ id: w.id as string, name: w.name as string }))}
             templates={data.templates.map((t) => ({ id: t.id as string, name: t.name as string, category: t.category as string }))}
@@ -55,56 +70,77 @@ export default async function StudiesPage({
         </Card>
       )}
 
-      <Card title={`All studies (${data.studies.length})`}>
-        <form className="mb-3 flex gap-2" action="/studies">
+      <form className="flex flex-wrap items-center gap-2" action="/studies">
+        <div className="relative">
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted">
+            <IconSearch width={14} height={14} />
+          </span>
           <input
             name="q"
             defaultValue={sp.q ?? ""}
-            placeholder="Search studies"
-            aria-label="Search studies"
-            className="h-8.5 w-64 rounded-md border border-line bg-surface px-2.5 text-sm"
+            placeholder="Søg i studier"
+            aria-label="Søg i studier"
+            className="h-9 w-64 rounded-full border border-line bg-surface pl-9 pr-3 text-sm placeholder:text-muted/70 focus:border-accent/60"
           />
-          <select name="status" defaultValue={sp.status ?? ""} aria-label="Status filter"
-            className="h-8.5 rounded-md border border-line bg-surface px-2 text-sm">
-            <option value="">All statuses</option>
-            {Object.keys(STATUS_TONE).map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <button type="submit" className="h-8.5 rounded-md border border-line bg-surface px-3 text-sm hover:bg-background cursor-pointer">
-            Filter
-          </button>
-        </form>
-        <Table>
-          <thead>
-            <tr>
-              <Th>Study</Th><Th>Workspace</Th><Th>Type</Th><Th>Status</Th>
-              <Th>Owner</Th><Th className="text-right">Versions</Th>
-              <Th className="text-right">Completed</Th><Th>Updated</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.studies.map((s) => (
-              <tr key={s.id}>
-                <Td>
-                  <Link href={`/studies/${s.id}`} className="font-medium text-accent hover:underline">{s.title}</Link>
-                  <span className="ml-2 space-x-1">
-                    {(s.method_tags as string[]).map((t) => <Badge key={t}>{t}</Badge>)}
-                  </span>
-                </Td>
-                <Td>{s.workspace}</Td>
-                <Td>{s.study_type}</Td>
-                <Td><Badge tone={STATUS_TONE[s.status] ?? "gray"}>{s.status}</Badge></Td>
-                <Td>{s.owner}</Td>
-                <Td className="text-right tabular-nums">{String(s.versions)}</Td>
-                <Td className="text-right tabular-nums">{String(s.completed)}</Td>
-                <Td className="whitespace-nowrap text-muted">{fmtDate(s.updated_at, session.locale)}</Td>
-              </tr>
-            ))}
-            {data.studies.length === 0 && (
-              <tr><Td colSpan={8} className="text-muted">No studies match.</Td></tr>
-            )}
-          </tbody>
-        </Table>
-      </Card>
+        </div>
+        <select
+          name="status"
+          defaultValue={sp.status ?? ""}
+          aria-label="Statusfilter"
+          className="h-9 rounded-full border border-line bg-surface px-3 text-sm focus:border-accent/60"
+        >
+          <option value="">Alle statusser</option>
+          {Object.keys(STUDY_STATUS).map((s) => (
+            <option key={s} value={s}>{STUDY_STATUS[s]}</option>
+          ))}
+        </select>
+        <button
+          type="submit"
+          className="h-9 cursor-pointer rounded-full border border-line bg-surface px-4 text-sm transition-colors hover:border-accent/50 hover:text-accent"
+        >
+          Filtrér
+        </button>
+        <span className="ml-auto text-xs text-muted">
+          {data.studies.length} {data.studies.length === 1 ? "studie" : "studier"}
+        </span>
+      </form>
+
+      <div className="space-y-2">
+        {data.studies.map((s) => (
+          <ListRow key={s.id} href={`/studies/${s.id}`} icon={<IconStudy />}>
+            <div className="flex min-w-0 items-center justify-between gap-4">
+              <div className="min-w-0">
+                <p className="truncate font-medium text-heading">{s.title}</p>
+                <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted">
+                  {s.workspace} · {label(STUDY_TYPE, s.study_type)}
+                  {(s.method_tags as string[]).map((tag) => (
+                    <Badge key={tag}>{tag}</Badge>
+                  ))}
+                </p>
+              </div>
+              <div className="hidden shrink-0 items-center gap-6 sm:flex">
+                <div className="w-28 text-right">
+                  <p className="text-sm font-semibold tabular-nums text-heading">{String(s.completed)}</p>
+                  <p className="text-xs text-muted">{Number(s.completed) === 1 ? "besvarelse" : "besvarelser"}</p>
+                </div>
+                <div className="w-32">
+                  <StatusBadge tone={STUDY_STATUS_TONE[s.status] ?? "gray"}>
+                    {label(STUDY_STATUS, s.status)}
+                  </StatusBadge>
+                </div>
+                <p className="w-24 text-right text-xs text-muted">{fmtDate(s.updated_at)}</p>
+              </div>
+            </div>
+          </ListRow>
+        ))}
+        {data.studies.length === 0 && (
+          <EmptyState
+            title="Ingen studier matcher"
+            hint="Justér søgningen eller filtrene — eller opret et nyt studie."
+            action={canCreate ? <LinkButton href="/studies?ny=1" variant="primary">+ Opret studie</LinkButton> : undefined}
+          />
+        )}
+      </div>
     </div>
   );
 }

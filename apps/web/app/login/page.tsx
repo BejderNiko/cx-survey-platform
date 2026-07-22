@@ -27,39 +27,39 @@ export default async function LoginPage({
     <main className="flex min-h-screen items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="mb-6 text-center">
-          <div className="text-xl font-semibold tracking-tight">
-            OK <span className="text-accent">· CX Survey Platform</span>
+          <div className="font-display text-2xl tracking-tight text-heading">
+            OK<span className="text-accent"> · CX</span>
           </div>
-          <p className="mt-1 text-sm text-muted">Internal research, CX, and analysis</p>
+          <p className="mt-1 text-sm text-muted">Panel, undersøgelser, kundeoplevelse og analyse</p>
         </div>
         <Card>
           <form action={login} className="space-y-3">
             {error && (
-              <p role="alert" className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-800">
-                Wrong email or password.
+              <p role="alert" className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-800">
+                Forkert e-mail eller adgangskode.
               </p>
             )}
             <div>
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">E-mail</Label>
               <Input id="email" name="email" type="email" autoComplete="username" required autoFocus />
             </div>
             <div>
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">Adgangskode</Label>
               <Input id="password" name="password" type="password" autoComplete="current-password" required />
             </div>
             <Button type="submit" className="w-full">
-              Sign in
+              Log ind
             </Button>
           </form>
         </Card>
-        <div className="mt-4 rounded-md border border-line bg-surface px-3 py-2 text-xs text-muted">
-          <p className="font-medium text-foreground mb-1">Local development sign-in</p>
+        <div className="mt-4 rounded-xl border border-line bg-surface px-3 py-2 text-xs text-muted">
+          <p className="font-medium text-foreground mb-1">Login til lokal udvikling</p>
           <p>
-            Seeded users: owner@, admin@, researcher@, panel@, analyst@, viewer@
-            (all <span className="font-mono">…@example.invalid</span>, password{" "}
+            Seedede brugere: owner@, admin@, researcher@, panel@, analyst@, viewer@
+            (alle <span className="font-mono">…@example.invalid</span>, adgangskode{" "}
             <span className="font-mono">demo1234!</span>).
           </p>
-          <p className="mt-1">Production sign-in uses Microsoft Entra ID via Supabase Auth (not enabled in local dev).</p>
+          <p className="mt-1">Produktionslogin sker via Microsoft Entra ID gennem Supabase Auth (ikke aktiveret i lokal udvikling).</p>
         </div>
       </div>
     </main>

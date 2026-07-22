@@ -52,7 +52,7 @@ export async function runAnalysis(input: RunAnalysisInput): Promise<{
   // Step 1 — durable 'running' row, committed before any network call.
   const prepared = await withAuthorized("analytics.run", async (tx, session) => {
     const payload = await loadDatasetPayload(tx, input.datasetVersionId);
-    if (!payload) throw new Error("Dataset version not found");
+    if (!payload) throw new Error("Datasætversionen blev ikke fundet");
 
     let recipeId = input.recipeId ?? null;
     if (!recipeId && input.recipeName) {
@@ -92,7 +92,7 @@ export async function runAnalysis(input: RunAnalysisInput): Promise<{
           and org_id = ${prepared.orgId}
           and org_id = ${session.orgId}
         returning id`;
-      if (updated.length !== 1) throw new Error("Analysis run could not be finalized as failed.");
+      if (updated.length !== 1) throw new Error("Analysekørslen kunne ikke afsluttes som fejlet.");
     });
     revalidatePath("/analytics");
     return { runId: prepared.runId, result: null, error: message };
@@ -111,7 +111,7 @@ export async function runAnalysis(input: RunAnalysisInput): Promise<{
         and org_id = ${prepared.orgId}
         and org_id = ${session.orgId}
       returning id`;
-    if (updated.length !== 1) throw new Error("Analysis run could not be finalized as succeeded.");
+    if (updated.length !== 1) throw new Error("Analysekørslen kunne ikke afsluttes som fuldført.");
   });
   revalidatePath("/analytics");
   return { runId: prepared.runId, result, error: null };
@@ -123,7 +123,7 @@ export async function rerunRecipe(recipeId: string, datasetVersionId: string) {
     const [r] = await tx`select procedure, params from analysis_recipes where id = ${recipeId}`;
     return r ?? null;
   });
-  if (!recipe) throw new Error("Recipe not found");
+  if (!recipe) throw new Error("Opskriften blev ikke fundet");
   return runAnalysis({
     datasetVersionId,
     procedure: recipe.procedure as string,
@@ -145,7 +145,7 @@ export interface DeriveInput {
 export async function deriveDataset(input: DeriveInput) {
   const result = await withAuthorized("datasets.create", async (tx, session) => {
     const payload = await loadDatasetPayload(tx, input.datasetVersionId);
-    if (!payload) throw new Error("Dataset version not found");
+    if (!payload) throw new Error("Datasætversionen blev ikke fundet");
     const [source] = await tx`
       select dv.dataset_id, dv.version_number, d.name as dataset_name
       from dataset_versions dv join datasets d on d.id = dv.dataset_id

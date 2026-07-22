@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { ROLES } from "@ok/domain";
 import { Badge, Button, Input, Label, Select, Td } from "@/components/ui";
+import { ROLE_LABEL, label } from "@/lib/labels";
 import { changeRole, inviteMember, setMemberActive } from "./actions";
 
 export function InviteForm() {
@@ -15,17 +16,17 @@ export function InviteForm() {
   return (
     <div className="flex flex-wrap items-end gap-2">
       <div className="w-64">
-        <Label htmlFor="inv-email">Email</Label>
+        <Label htmlFor="inv-email">E-mail</Label>
         <Input id="inv-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
       </div>
       <div className="w-48">
-        <Label htmlFor="inv-name">Full name</Label>
+        <Label htmlFor="inv-name">Fulde navn</Label>
         <Input id="inv-name" value={name} onChange={(e) => setName(e.target.value)} />
       </div>
       <div>
-        <Label htmlFor="inv-role">Role</Label>
+        <Label htmlFor="inv-role">Rolle</Label>
         <Select id="inv-role" value={role} onChange={(e) => setRole(e.target.value)}>
-          {ROLES.map((r) => <option key={r} value={r}>{r.replace("_", " ")}</option>)}
+          {ROLES.map((r) => <option key={r} value={r}>{label(ROLE_LABEL, r)}</option>)}
         </Select>
       </div>
       <Button
@@ -35,14 +36,14 @@ export function InviteForm() {
             const res = await inviteMember(email, name, role);
             setMessage(
               res.oneTimePassword
-                ? `Member created. One-time password (share securely): ${res.oneTimePassword}`
-                : "Existing user added to the organization.",
+                ? `Medlem oprettet. Engangsadgangskode (del sikkert): ${res.oneTimePassword}`
+                : "Eksisterende bruger er tilføjet organisationen.",
             );
             setEmail(""); setName("");
           })
         }
       >
-        Invite
+        Invitér
       </Button>
       {message && <span className="text-sm text-success">{message}</span>}
     </div>
@@ -58,25 +59,25 @@ export function MemberRow({
   const [pending, startTransition] = useTransition();
   return (
     <tr className={!active ? "opacity-50" : undefined}>
-      <Td>{name}{isSelf && <Badge className="ml-1.5" tone="accent">you</Badge>}</Td>
+      <Td>{name}{isSelf && <Badge className="ml-1.5" tone="accent">dig</Badge>}</Td>
       <Td>{email}</Td>
       <Td>
         <Select
-          aria-label={`Role for ${name}`}
+          aria-label={`Rolle for ${name}`}
           value={role}
           disabled={pending || isSelf}
           onChange={(e) => startTransition(() => changeRole(membershipId, e.target.value))}
         >
-          {ROLES.map((r) => <option key={r} value={r}>{r.replace("_", " ")}</option>)}
+          {ROLES.map((r) => <option key={r} value={r}>{label(ROLE_LABEL, r)}</option>)}
         </Select>
       </Td>
-      <Td><Badge tone={active ? "green" : "gray"}>{active ? "active" : "deactivated"}</Badge></Td>
+      <Td><Badge tone={active ? "green" : "gray"}>{active ? "aktiv" : "deaktiveret"}</Badge></Td>
       <Td className="whitespace-nowrap text-muted">{since}</Td>
       <Td>
         {!isSelf && (
           <Button size="sm" variant={active ? "ghost" : "secondary"} disabled={pending}
             onClick={() => startTransition(() => setMemberActive(membershipId, !active))}>
-            {active ? "Deactivate" : "Reactivate"}
+            {active ? "Deaktivér" : "Genaktivér"}
           </Button>
         )}
       </Td>

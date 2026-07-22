@@ -18,11 +18,11 @@ export default async function ImportPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Import panelists"
-        description="CSV or XLSX. Preview, map columns, validate, dry-run, then commit. No file is imported without a dry run."
+        title="Importér panelister"
+        description="CSV eller XLSX. Forhåndsvis, tilknyt kolonner, validér, prøvekør og gennemfør. Ingen fil importeres uden en prøvekørsel."
         actions={<Link href="/panel" className="text-sm text-accent hover:underline">← Panel</Link>}
       />
-      <ImportWizard attributeFields={attributeKeys} history={batches} locale={session.locale} />
+      <ImportWizard attributeFields={attributeKeys} history={batches} />
     </div>
   );
 }

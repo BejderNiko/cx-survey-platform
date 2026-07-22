@@ -1,15 +1,29 @@
 import Link from "next/link";
 import { computeNps } from "@ok/domain";
-import { Badge, Card, KpiTile, Table, Td, Th } from "@/components/ui";
+import { IconStudy } from "@/components/icons";
+import { Badge, Card, KpiTile, ListRow, StatusBadge, Table, Td, Th } from "@/components/ui";
 import { requireSession } from "@/lib/auth";
 import { withUser } from "@/lib/db";
 import { fmtDateTime, fmtNumber, fmtPercent } from "@/lib/format";
+import { CHANNEL, RESPONSE_STATUS, RUN_STATUS, STUDY_STATUS, STUDY_STATUS_TONE, label } from "@/lib/labels";
+
+function greeting(): string {
+  const hour = Number(
+    new Intl.DateTimeFormat("da-DK", { hour: "numeric", hour12: false, timeZone: "Europe/Copenhagen" }).format(new Date()),
+  );
+  if (hour < 5) return "Godnat";
+  if (hour < 10) return "Godmorgen";
+  if (hour < 12) return "Godformiddag";
+  if (hour < 18) return "Goddag";
+  return "Godaften";
+}
 
 export default async function HomePage() {
   const session = await requireSession();
+  const firstName = session.fullName.split(/\s+/)[0] ?? session.fullName;
 
   const data = await withUser(session.userId, async (tx) => {
-    const [liveStudies, respStats, panelStats, followupOpen, myCases, recentRuns, npsValues, recentResponses] =
+    const [liveStudies, respStats, panelStats, recentRuns, npsValues, recentResponses] =
       await Promise.all([
         tx`select s.id, s.title, s.status, s.study_type,
                   (select count(*) from responses r where r.study_id = s.id and r.status = 'completed') as completed
@@ -23,9 +37,6 @@ export default async function HomePage() {
                   count(*) as total,
                   count(*) filter (where lifecycle in ('unsubscribed','bounced','blocked')) as unreachable
            from panelists`,
-        tx`select count(*) as open from followup_cases where status in ('new','assigned','in_progress','waiting')`,
-        tx`select count(*) as mine from followup_cases
-           where assignee_id = ${session.userId} and status in ('new','assigned','in_progress','waiting')`,
         tx`select ar.id, ar.procedure, ar.status, ar.started_at, d.name as dataset_name
            from analysis_runs ar
            join dataset_versions dv on dv.id = ar.dataset_version_id
@@ -35,7 +46,7 @@ export default async function HomePage() {
            join responses r on r.id = ra.response_id
            where ra.question_code = 'nps_score' and r.status = 'completed'
              and r.started_at > now() - interval '90 days'`,
-        tx`select r.id, s.title, r.status, r.channel, r.started_at
+        tx`select r.id, s.title, s.id as study_id, r.status, r.channel, r.started_at
            from responses r join studies s on s.id = r.study_id
            order by r.started_at desc limit 6`,
       ]);
@@ -43,8 +54,6 @@ export default async function HomePage() {
       liveStudies,
       respStats: respStats[0],
       panelStats: panelStats[0],
-      followupOpen: Number(followupOpen[0].open),
-      myCases: Number(myCases[0].mine),
       recentRuns,
       nps: computeNps(npsValues.map((v) => v.value)),
       recentResponses,
@@ -57,124 +66,131 @@ export default async function HomePage() {
       : null;
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-lg font-semibold">Operational overview</h1>
+    <div className="space-y-5">
+      <div>
+        <h1 className="font-display text-3xl tracking-tight text-heading">
+          {greeting()}, {firstName}
+        </h1>
+        <p className="mt-1 text-sm text-muted">
+          {new Intl.DateTimeFormat("da-DK", { dateStyle: "full", timeZone: "Europe/Copenhagen" }).format(new Date())}
+        </p>
+      </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiTile
-          label="NPS · last 90 days"
-          value={data.nps.score === null ? "—" : fmtNumber(data.nps.score, session.locale)}
-          hint={`${data.nps.valid} valid responses`}
+          label="NPS · seneste 90 dage"
+          value={data.nps.score === null ? "—" : fmtNumber(data.nps.score)}
+          hint={`${data.nps.valid} gyldige svar`}
           tone={data.nps.score !== null && data.nps.score > 0 ? "good" : "bad"}
         />
-        <KpiTile label="Responses · 30 days" value={String(data.respStats.last30)} hint={`${data.respStats.last7} in the last 7 days`} />
+        <KpiTile label="Besvarelser · 30 dage" value={String(data.respStats.last30)} hint={`${data.respStats.last7} de seneste 7 dage`} />
         <KpiTile
-          label="Completion rate"
-          value={fmtPercent(completionRate, session.locale)}
-          hint="completed of all started"
+          label="Gennemførselsrate"
+          value={fmtPercent(completionRate)}
+          hint="gennemførte af alle startede"
         />
         <KpiTile
-          label="Active panelists"
+          label="Aktive panelister"
           value={String(data.panelStats.active)}
-          hint={`${data.panelStats.unreachable} unreachable of ${data.panelStats.total}`}
-        />
-        <KpiTile
-          label="Open follow-ups"
-          value={String(data.followupOpen)}
-          hint={`${data.myCases} assigned to you`}
-          tone={data.followupOpen > 0 ? "bad" : "good"}
+          hint={`${data.panelStats.unreachable} kan ikke kontaktes af ${data.panelStats.total}`}
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card title="Current studies" actions={<Link className="text-xs text-accent hover:underline" href="/studies">All studies</Link>}>
-          <Table>
-            <thead>
-              <tr>
-                <Th>Study</Th>
-                <Th>Type</Th>
-                <Th>Status</Th>
-                <Th className="text-right">Completed</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.liveStudies.map((s) => (
-                <tr key={s.id}>
-                  <Td>
-                    <Link href={`/studies/${s.id}`} className="font-medium text-accent hover:underline">
-                      {s.title}
-                    </Link>
-                  </Td>
-                  <Td>{s.study_type}</Td>
-                  <Td>
-                    <Badge tone={s.status === "live" ? "green" : "amber"}>{s.status}</Badge>
-                  </Td>
-                  <Td className="text-right tabular-nums">{String(s.completed)}</Td>
-                </tr>
-              ))}
-              {data.liveStudies.length === 0 && (
-                <tr>
-                  <Td colSpan={4} className="text-muted">No live studies.</Td>
-                </tr>
-              )}
-            </tbody>
-          </Table>
-        </Card>
+      <section>
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-heading">Aktuelle studier</h2>
+          <Link className="text-xs text-accent hover:underline" href="/studies">Alle studier</Link>
+        </div>
+        <div className="space-y-2">
+          {data.liveStudies.map((s) => (
+            <ListRow key={s.id} href={`/studies/${s.id}`} icon={<IconStudy />}>
+              <div className="flex min-w-0 items-center justify-between gap-4">
+                <p className="truncate font-medium text-heading">{s.title}</p>
+                <div className="hidden shrink-0 items-center gap-6 sm:flex">
+                  <div className="w-28 text-right">
+                    <p className="text-sm font-semibold tabular-nums text-heading">{String(s.completed)}</p>
+                    <p className="text-xs text-muted">{Number(s.completed) === 1 ? "besvarelse" : "besvarelser"}</p>
+                  </div>
+                  <div className="w-32">
+                    <StatusBadge tone={STUDY_STATUS_TONE[s.status] ?? "gray"}>
+                      {label(STUDY_STATUS, s.status)}
+                    </StatusBadge>
+                  </div>
+                </div>
+              </div>
+            </ListRow>
+          ))}
+          {data.liveStudies.length === 0 && (
+            <p className="rounded-xl border border-dashed border-line-strong bg-surface px-4 py-6 text-center text-sm text-muted">
+              Ingen aktive studier.
+            </p>
+          )}
+        </div>
+      </section>
 
-        <Card title="Latest response activity" actions={<Link className="text-xs text-accent hover:underline" href="/responses">Inbox</Link>}>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card title="Seneste besvarelser" actions={<span className="text-xs text-muted">på tværs af studier</span>}>
           <Table>
             <thead>
               <tr>
-                <Th>Study</Th>
+                <Th>Studie</Th>
                 <Th>Status</Th>
-                <Th>Channel</Th>
-                <Th>Started</Th>
+                <Th>Kanal</Th>
+                <Th>Påbegyndt</Th>
               </tr>
             </thead>
             <tbody>
               {data.recentResponses.map((r) => (
                 <tr key={r.id}>
-                  <Td>{r.title}</Td>
                   <Td>
-                    <Badge tone={r.status === "completed" ? "green" : r.status === "started" ? "amber" : "gray"}>{r.status}</Badge>
+                    <Link href={`/studies/${r.study_id}/results`} className="text-accent hover:underline">
+                      {r.title}
+                    </Link>
                   </Td>
-                  <Td>{r.channel}</Td>
-                  <Td className="whitespace-nowrap text-muted">{fmtDateTime(r.started_at, session.locale)}</Td>
+                  <Td>
+                    <Badge tone={r.status === "completed" ? "green" : r.status === "started" ? "amber" : "gray"}>
+                      {label(RESPONSE_STATUS, r.status)}
+                    </Badge>
+                  </Td>
+                  <Td>{label(CHANNEL, r.channel)}</Td>
+                  <Td className="whitespace-nowrap text-muted">{fmtDateTime(r.started_at)}</Td>
                 </tr>
               ))}
             </tbody>
           </Table>
         </Card>
-      </div>
 
-      <Card title="Recent analyses" actions={<Link className="text-xs text-accent hover:underline" href="/analytics">Analytics</Link>}>
-        {data.recentRuns.length === 0 ? (
-          <p className="text-sm text-muted">No analyses have been run yet.</p>
-        ) : (
-          <Table>
-            <thead>
-              <tr>
-                <Th>Procedure</Th>
-                <Th>Dataset</Th>
-                <Th>Status</Th>
-                <Th>Started</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.recentRuns.map((r) => (
-                <tr key={r.id}>
-                  <Td className="font-mono text-xs">{r.procedure}</Td>
-                  <Td>{r.dataset_name}</Td>
-                  <Td>
-                    <Badge tone={r.status === "succeeded" ? "green" : r.status === "failed" ? "red" : "amber"}>{r.status}</Badge>
-                  </Td>
-                  <Td className="text-muted whitespace-nowrap">{fmtDateTime(r.started_at, session.locale)}</Td>
+        <Card title="Seneste analyser" actions={<Link className="text-xs text-accent hover:underline" href="/analytics">Analyse</Link>}>
+          {data.recentRuns.length === 0 ? (
+            <p className="text-sm text-muted">Der er ikke kørt analyser endnu.</p>
+          ) : (
+            <Table>
+              <thead>
+                <tr>
+                  <Th>Procedure</Th>
+                  <Th>Datasæt</Th>
+                  <Th>Status</Th>
+                  <Th>Startet</Th>
                 </tr>
-              ))}
-            </tbody>
-          </Table>
-        )}
-      </Card>
+              </thead>
+              <tbody>
+                {data.recentRuns.map((r) => (
+                  <tr key={r.id}>
+                    <Td className="font-mono text-xs">{r.procedure}</Td>
+                    <Td>{r.dataset_name}</Td>
+                    <Td>
+                      <Badge tone={r.status === "succeeded" ? "green" : r.status === "failed" ? "red" : "amber"}>
+                        {label(RUN_STATUS, r.status)}
+                      </Badge>
+                    </Td>
+                    <Td className="text-muted whitespace-nowrap">{fmtDateTime(r.started_at)}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }

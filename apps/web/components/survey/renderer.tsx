@@ -214,7 +214,7 @@ export function SurveyRenderer({
       {phase === "done" && (
         <div className="rounded-lg border border-line bg-surface p-6 text-center">
           <p className="text-base">{msg("thankYou") || (locale === "da" ? "Tak for din besvarelse." : "Thank you for your response.")}</p>
-          {mode === "preview" && <p className="mt-2 text-xs text-muted">Preview — no data was recorded.</p>}
+          {mode === "preview" && <p className="mt-2 text-xs text-muted">Forhåndsvisning — der blev ikke gemt data.</p>}
         </div>
       )}
 
@@ -507,7 +507,11 @@ function QuestionInput({
       );
     }
     default:
-      return <p className="text-sm text-muted">Unsupported question type.</p>;
+      return (
+        <p className="text-sm text-muted">
+          {locale === "da" ? "Spørgsmålstypen understøttes ikke." : "Unsupported question type."}
+        </p>
+      );
   }
 }
 

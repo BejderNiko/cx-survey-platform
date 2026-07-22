@@ -63,7 +63,7 @@ export async function updateDraft(studyId: string, definitionRaw: unknown) {
 export async function publishStudy(studyId: string) {
   const result = await withAuthorized("studies.publish", async (tx, session) => {
     const [study] = await tx`select draft_definition, status from studies where id = ${studyId}`;
-    if (!study) throw new Error("Study not found");
+    if (!study) throw new Error("Studiet blev ikke fundet");
     const def = instrumentDefinition.parse(study.draft_definition);
     const problems = validateInstrument(def);
     if (problems.length > 0) return { ok: false as const, problems };
@@ -110,7 +110,7 @@ export async function duplicateStudy(studyId: string) {
   const newId = await withAuthorized("studies.create", async (tx, session) => {
     const [src] = await tx`select title, workspace_id, study_type, method_tags, draft_definition, theme, settings
                            from studies where id = ${studyId}`;
-    if (!src) throw new Error("Study not found");
+    if (!src) throw new Error("Studiet blev ikke fundet");
     const [copy] = await tx`
       insert into studies (org_id, workspace_id, title, study_type, method_tags, status, owner_id,
                            draft_definition, theme, settings)

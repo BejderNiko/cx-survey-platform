@@ -21,7 +21,7 @@ import {
 
 async function fileFromForm(formData: FormData): Promise<{ buffer: Buffer; name: string }> {
   const file = formData.get("file");
-  if (!(file instanceof File)) throw new Error("No file provided.");
+  if (!(file instanceof File)) throw new Error("Der er ikke valgt nogen fil.");
   const problem = checkFile(file.name, file.size, file.type);
   if (problem) throw new Error(problem);
   return { buffer: Buffer.from(await file.arrayBuffer()), name: file.name };
@@ -113,7 +113,7 @@ export async function dryRunStep(formData: FormData) {
   const mapping = JSON.parse(String(formData.get("mapping") ?? "{}")) as ImportMapping;
   const dedupRule = (formData.get("dedupRule") as DedupRule) ?? "external_id";
   const consentConfirmed = formData.get("consentConfirmed") === "true";
-  if (!consentConfirmed) throw new Error("Confirm the consent basis before running the import.");
+  if (!consentConfirmed) throw new Error("Bekræft samtykkegrundlaget, før importen køres.");
 
   return withAuthorized("panel.import", async (tx, session) => {
     const { buffer, name } = await fileFromForm(formData);
@@ -141,7 +141,7 @@ export async function commitStep(formData: FormData) {
   const mapping = JSON.parse(String(formData.get("mapping") ?? "{}")) as ImportMapping;
   const dedupRule = (formData.get("dedupRule") as DedupRule) ?? "external_id";
   const batchId = String(formData.get("batchId") ?? "");
-  if (!batchId) throw new Error("Run the dry run first.");
+  if (!batchId) throw new Error("Kør prøvekørslen først.");
 
   const result = await withAuthorized("panel.import", async (tx, session) => {
     const { buffer, name } = await fileFromForm(formData);
@@ -151,15 +151,15 @@ export async function commitStep(formData: FormData) {
       where id = ${batchId} and status = 'dry_run' and filename = ${name}
         and mapping = ${tx.json(mapping as never)} and dedup_rule = ${dedupRule}
       for update`;
-    if (!batch) throw new Error("Dry run no longer matches this import request.");
+    if (!batch) throw new Error("Prøvekørslen svarer ikke længere til denne import.");
     const storedBinding = batch.counts as { fileSha256?: string; sheet?: string | null };
     if (storedBinding.fileSha256 !== fileFingerprint(buffer) || storedBinding.sheet !== (sheet ?? null)) {
-      throw new Error("File or worksheet changed after dry run. Run the review again before committing.");
+      throw new Error("Filen eller arket er ændret efter prøvekørslen. Kør gennemgangen igen, før du gennemfører.");
     }
     const parsed = await parseImportFile(buffer, name, sheet);
     const { validation, counts, creates, updates } = await planImport(tx, session.orgId, parsed.rows, mapping, dedupRule);
     if (!samePlanCounts(batch.counts as Record<string, unknown>, counts)) {
-      throw new Error("Panel data changed after dry run. Run the review again before committing.");
+      throw new Error("Paneldata er ændret efter prøvekørslen. Kør gennemgangen igen, før du gennemfører.");
     }
 
     const fieldsFor = (row: NormalizedRow) => ({

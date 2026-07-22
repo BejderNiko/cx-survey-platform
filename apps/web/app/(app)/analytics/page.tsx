@@ -5,6 +5,7 @@ import { requireSession } from "@/lib/auth";
 import { analyticsHealth } from "@/lib/analytics-client";
 import { withUser } from "@/lib/db";
 import { fmtDateTime } from "@/lib/format";
+import { RUN_STATUS, label } from "@/lib/labels";
 import { BuildDatasetButton } from "./build-dataset-button";
 
 export default async function AnalyticsPage() {
@@ -41,31 +42,31 @@ export default async function AnalyticsPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Analytics"
+        title="Analyse"
         description={
           health.ok
-            ? `Analytics service online · ${health.procedures.length} procedures · pandas ${health.versions.pandas}, scipy ${health.versions.scipy}, statsmodels ${health.versions.statsmodels}`
-            : "Analytics service offline — start it with: cd apps/analytics && uv run uvicorn ok_analytics.main:app --port 8000"
+            ? `Analysetjenesten er online · ${health.procedures.length} procedurer · pandas ${health.versions.pandas}, scipy ${health.versions.scipy}, statsmodels ${health.versions.statsmodels}`
+            : "Analysetjenesten er offline — start den med: cd apps/analytics && uv run uvicorn ok_analytics.main:app --port 8000"
         }
       />
 
       {canCreate && (
-        <Card title="Build dataset from study responses">
+        <Card title="Byg datasæt fra studiebesvarelser">
           <BuildDatasetButton studies={data.studies.map((s) => ({ id: s.id as string, title: s.title as string }))} />
           <p className="mt-2 text-xs text-muted">
-            Builds a versioned, analysis-ready dataset from completed responses. Raw responses are never modified;
-            rebuilding creates a new dataset version with recorded lineage.
+            Bygger et versioneret, analyseklart datasæt fra gennemførte besvarelser. Rådata ændres aldrig;
+            genopbygning opretter en ny datasætversion med registreret afstamning.
           </p>
         </Card>
       )}
 
-      <Card title="Dataset registry">
+      <Card title="Datasætregister">
         <Table>
           <thead>
             <tr>
-              <Th>Dataset</Th><Th>Source</Th><Th>Owner</Th>
-              <Th className="text-right">Version</Th><Th className="text-right">Rows</Th>
-              <Th className="text-right">Variables</Th><Th>Created</Th>
+              <Th>Datasæt</Th><Th>Kilde</Th><Th>Ejer</Th>
+              <Th className="text-right">Version</Th><Th className="text-right">Rækker</Th>
+              <Th className="text-right">Variabler</Th><Th>Oprettet</Th>
             </tr>
           </thead>
           <tbody>
@@ -76,27 +77,27 @@ export default async function AnalyticsPage() {
                   {d.description && <p className="text-xs text-muted">{d.description}</p>}
                 </Td>
                 <Td>
-                  <Badge tone={d.source_kind === "derived" ? "amber" : "blue"}>{d.source_kind}</Badge>
+                  <Badge tone={d.source_kind === "derived" ? "amber" : "blue"}>{d.source_kind === "derived" ? "afledt" : "studie"}</Badge>
                   {d.study_title && <span className="ml-1 text-xs text-muted">{d.study_title}</span>}
                 </Td>
                 <Td>{d.owner}</Td>
                 <Td className="text-right tabular-nums">v{String(d.latest_version ?? "—")}</Td>
                 <Td className="text-right tabular-nums">{String(d.row_count ?? "—")}</Td>
                 <Td className="text-right tabular-nums">{String(d.variable_count ?? "—")}</Td>
-                <Td className="whitespace-nowrap text-muted">{fmtDateTime(d.created_at, session.locale)}</Td>
+                <Td className="whitespace-nowrap text-muted">{fmtDateTime(d.created_at)}</Td>
               </tr>
             ))}
             {data.datasets.length === 0 && (
-              <tr><Td colSpan={7} className="text-muted">No datasets yet — build one from a study above.</Td></tr>
+              <tr><Td colSpan={7} className="text-muted">Ingen datasæt endnu — byg ét fra et studie ovenfor.</Td></tr>
             )}
           </tbody>
         </Table>
       </Card>
 
-      <Card title="Recent analysis runs">
+      <Card title="Seneste analysekørsler">
         <Table>
           <thead>
-            <tr><Th>Procedure</Th><Th>Dataset</Th><Th>Status</Th><Th>By</Th><Th>Started</Th></tr>
+            <tr><Th>Procedure</Th><Th>Datasæt</Th><Th>Status</Th><Th>Af</Th><Th>Startet</Th></tr>
           </thead>
           <tbody>
             {data.runs.map((r) => (
@@ -104,14 +105,14 @@ export default async function AnalyticsPage() {
                 <Td className="font-mono text-xs">{r.procedure}</Td>
                 <Td><Link className="text-accent hover:underline" href={`/analytics/datasets/${r.dataset_id}`}>{r.dataset_name}</Link></Td>
                 <Td>
-                  <Badge tone={r.status === "succeeded" ? "green" : r.status === "failed" ? "red" : "amber"}>{r.status}</Badge>
+                  <Badge tone={r.status === "succeeded" ? "green" : r.status === "failed" ? "red" : "amber"}>{label(RUN_STATUS, r.status)}</Badge>
                   {r.error && <span className="ml-1 text-xs text-danger">{r.error}</span>}
                 </Td>
                 <Td>{r.author}</Td>
-                <Td className="whitespace-nowrap text-muted">{fmtDateTime(r.started_at, session.locale)}</Td>
+                <Td className="whitespace-nowrap text-muted">{fmtDateTime(r.started_at)}</Td>
               </tr>
             ))}
-            {data.runs.length === 0 && <tr><Td colSpan={5} className="text-muted">No analyses run yet.</Td></tr>}
+            {data.runs.length === 0 && <tr><Td colSpan={5} className="text-muted">Der er ikke kørt analyser endnu.</Td></tr>}
           </tbody>
         </Table>
       </Card>

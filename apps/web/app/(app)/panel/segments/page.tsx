@@ -23,16 +23,16 @@ export default async function SegmentsPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Segments"
-        description="Reusable panelist selections for distributions and analysis."
+        title="Segmenter"
+        description="Genbrugelige panelistudvalg til udsendelser og analyse."
         actions={<Link href="/panel" className="text-sm text-accent hover:underline">← Panel</Link>}
       />
 
-      <Card title="Saved segments">
+      <Card title="Gemte segmenter">
         <Table>
           <thead>
             <tr>
-              <Th>Name</Th><Th>Filters</Th><Th>Author</Th><Th>Created</Th>{canManage && <Th />}
+              <Th>Navn</Th><Th>Filtre</Th><Th>Oprettet af</Th><Th>Oprettet</Th>{canManage && <Th />}
             </tr>
           </thead>
           <tbody>
@@ -49,25 +49,25 @@ export default async function SegmentsPage() {
                     {(s.definition?.filters ?? [])
                       .map((f: { field: string; key?: string; op: string; value: unknown }) =>
                         `${f.field}${f.key ? `.${f.key}` : ""} ${f.op} ${JSON.stringify(f.value)}`)
-                      .join(" AND ")}
+                      .join(" OG ")}
                   </code>
                 </Td>
                 <Td>{s.author}</Td>
-                <Td className="whitespace-nowrap text-muted">{fmtDate(s.created_at, session.locale)}</Td>
+                <Td className="whitespace-nowrap text-muted">{fmtDate(s.created_at)}</Td>
                 {canManage && (
                   <Td><SegmentDeleteButton segmentId={s.id} /></Td>
                 )}
               </tr>
             ))}
             {data.segments.length === 0 && (
-              <tr><Td colSpan={5} className="text-muted">No segments saved yet.</Td></tr>
+              <tr><Td colSpan={5} className="text-muted">Ingen segmenter gemt endnu.</Td></tr>
             )}
           </tbody>
         </Table>
       </Card>
 
       {canManage && (
-        <Card title="Create segment">
+        <Card title="Opret segment">
           <SegmentBuilder
             attributeFields={data.fields.map((f) => ({
               key: f.key as string,

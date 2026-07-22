@@ -1,0 +1,15 @@
+# Keep the build context small and reproducible: nothing here is needed to
+# build the image (deps come from pyproject.toml + uv.lock, code from src/).
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+tests/
+*.md
+Dockerfile
+.dockerignore
+vercel.json
+.python-version
