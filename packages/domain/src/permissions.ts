@@ -27,6 +27,7 @@ export const ACTIONS = [
   "panel.export",
   "panel.anonymize",
   "segments.manage",
+  "recruitment.manage",
   // studies
   "studies.view",
   "studies.create",
@@ -89,6 +90,7 @@ const MATRIX: Record<Role, ReadonlySet<Action>> = {
     "panel.export",
     "panel.anonymize",
     "segments.manage",
+    "recruitment.manage",
     "distributions.create",
   ]),
   analyst: new Set([
