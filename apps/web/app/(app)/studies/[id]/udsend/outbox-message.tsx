@@ -19,14 +19,14 @@ export function OutboxMessageView({
         <Td className="whitespace-nowrap text-muted">{createdAt}</Td>
         <Td>
           <button className="text-xs text-accent underline cursor-pointer" onClick={() => setOpen((o) => !o)}>
-            {open ? "Hide" : "View"}
+            {open ? "Skjul" : "Vis"}
           </button>
         </Td>
       </tr>
       {open && (
         <tr>
           <Td colSpan={6}>
-            <pre className="whitespace-pre-wrap rounded-md bg-background p-3 text-xs">{body}</pre>
+            <pre className="whitespace-pre-wrap rounded-lg bg-surface-raised p-3 text-xs">{body}</pre>
           </Td>
         </tr>
       )}

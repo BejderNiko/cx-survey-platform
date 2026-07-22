@@ -7,11 +7,11 @@ export default async function PublicSurveyPage({ params }: { params: Promise<{ t
   const survey = await getPublicSurvey(token);
 
   if (!survey) {
-    return <Shell><p className="text-center">This survey link is not valid.</p></Shell>;
+    return <Shell><p className="text-center">Dette undersøgelseslink er ikke gyldigt.</p></Shell>;
   }
   if (survey.studyStatus !== "live") {
     const closed = lt(survey.definition.messages?.closed, survey.definition.defaultLanguage);
-    return <Shell><p className="text-center">{closed || "This survey is closed for responses."}</p></Shell>;
+    return <Shell><p className="text-center">{closed || "Undersøgelsen er lukket for besvarelser."}</p></Shell>;
   }
   return (
     <Shell>
@@ -25,7 +25,7 @@ function Shell({ children }: { children: React.ReactNode }) {
     <main className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
       <div className="w-full max-w-xl">
         {children}
-        <p className="mt-6 text-center text-xs text-muted">OK · CX Survey Platform</p>
+        <p className="mt-6 text-center text-xs text-muted">OK · CX &amp; Market Insights</p>
       </div>
     </main>
   );

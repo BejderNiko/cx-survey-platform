@@ -23,16 +23,16 @@ export function ProfileActions({
   const [pending, startTransition] = useTransition();
 
   return (
-    <Card title="Tags, notes & governance">
+    <Card title="Tags, noter og databeskyttelse">
       <div>
-        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">Tags</h3>
+        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Tags</h3>
         <div className="flex flex-wrap items-center gap-1.5">
           {tags.map((t) => (
             <span key={t.id} className="inline-flex items-center gap-1">
               <Badge>{t.name}</Badge>
               {canEdit && (
                 <button
-                  aria-label={`Remove tag ${t.name}`}
+                  aria-label={`Fjern tagget ${t.name}`}
                   className="text-xs text-muted hover:text-danger cursor-pointer"
                   onClick={() => startTransition(() => removeTagFromPanelist(panelistId, t.id))}
                 >
@@ -41,13 +41,13 @@ export function ProfileActions({
               )}
             </span>
           ))}
-          {tags.length === 0 && <span className="text-sm text-muted">No tags.</span>}
+          {tags.length === 0 && <span className="text-sm text-muted">Ingen tags.</span>}
         </div>
         {canEdit && (
           <div className="mt-2 flex gap-2">
             <Input
-              aria-label="New tag"
-              placeholder="add tag"
+              aria-label="Nyt tag"
+              placeholder="tilføj tag"
               value={newTag}
               onChange={(e) => setNewTag(e.target.value)}
               className="h-7 w-36 text-xs"
@@ -63,31 +63,31 @@ export function ProfileActions({
                 })
               }
             >
-              Add
+              Tilføj
             </Button>
           </div>
         )}
       </div>
 
       <div className="mt-4">
-        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">Notes</h3>
+        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Noter</h3>
         <ul className="space-y-2">
           {notes.map((n) => (
-            <li key={n.id} className="rounded-md border border-line bg-background px-2.5 py-1.5 text-sm">
+            <li key={n.id} className="rounded-lg border border-line bg-surface-raised px-2.5 py-1.5 text-sm">
               <p>{n.body}</p>
               <p className="mt-0.5 text-xs text-muted">
                 {n.author} · {n.createdAt}
               </p>
             </li>
           ))}
-          {notes.length === 0 && <li className="text-sm text-muted">No notes.</li>}
+          {notes.length === 0 && <li className="text-sm text-muted">Ingen noter.</li>}
         </ul>
         {canEdit && (
           <div className="mt-2 space-y-2">
             <Textarea
-              aria-label="New note"
+              aria-label="Ny note"
               rows={2}
-              placeholder="Add a note…"
+              placeholder="Skriv en note…"
               value={noteBody}
               onChange={(e) => setNoteBody(e.target.value)}
             />
@@ -102,7 +102,7 @@ export function ProfileActions({
                 })
               }
             >
-              Save note
+              Gem note
             </Button>
           </div>
         )}
@@ -110,16 +110,16 @@ export function ProfileActions({
 
       {canAnonymize && (
         <div className="mt-4 border-t border-line pt-3">
-          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">GDPR</h3>
+          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">GDPR</h3>
           {!confirming ? (
             <Button size="sm" variant="danger" onClick={() => setConfirming(true)}>
-              Anonymize panelist…
+              Anonymisér panelist…
             </Button>
           ) : (
-            <div className="rounded-md border border-danger/30 bg-red-50 p-2.5 text-xs">
+            <div className="rounded-lg border border-danger/30 bg-red-50 p-2.5 text-xs">
               <p className="mb-2">
-                This irreversibly removes all identity data and breaks the link to existing
-                responses. It cannot be undone.
+                Dette fjerner uigenkaldeligt alle identitetsdata og bryder koblingen til
+                eksisterende besvarelser. Det kan ikke fortrydes.
               </p>
               <div className="flex gap-2">
                 <Button
@@ -128,10 +128,10 @@ export function ProfileActions({
                   disabled={pending}
                   onClick={() => startTransition(() => anonymizePanelist(panelistId))}
                 >
-                  Confirm anonymization
+                  Bekræft anonymisering
                 </Button>
                 <Button size="sm" variant="secondary" onClick={() => setConfirming(false)}>
-                  Cancel
+                  Annullér
                 </Button>
               </div>
             </div>

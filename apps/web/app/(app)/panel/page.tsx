@@ -1,5 +1,5 @@
 import { can, segmentDefinition } from "@ok/domain";
-import { Badge, Card, KpiTile, LinkButton, PageHeader } from "@/components/ui";
+import { Card, KpiTile, LinkButton, PageHeader } from "@/components/ui";
 import { requireSession } from "@/lib/auth";
 import { withUser } from "@/lib/db";
 import { listPanelists } from "@/lib/data/panel";
@@ -56,21 +56,21 @@ export default async function PanelPage({
     <div className="space-y-4">
       <PageHeader
         title="Panel"
-        description={`${data.total} panelists match the current filters`}
+        description={`${data.total} panelister matcher de aktuelle filtre`}
         actions={
           <>
-            <LinkButton href="/panel/segments">Segments</LinkButton>
-            {can(session.role, "panel.import") && <LinkButton href="/panel/import" variant="primary">Import</LinkButton>}
+            <LinkButton href="/panel/segments">Segmenter</LinkButton>
+            {can(session.role, "panel.import") && <LinkButton href="/panel/import" variant="primary">Importér</LinkButton>}
           </>
         }
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <KpiTile label="Active" value={String(data.health.active)} hint={`of ${data.health.total} total`} />
-        <KpiTile label="Survey consent" value={String(data.health.consented)} hint="granted survey_contact" />
-        <KpiTile label="Unsubscribed" value={String(data.health.unsubscribed)} />
-        <KpiTile label="Undeliverable" value={String(data.health.undeliverable)} hint="bounced or blocked" />
-        <KpiTile label="Open rate · 30d" value={openRate === null ? "—" : `${openRate}%`} hint={`${data.activity.sent30} sent, ${data.activity.responded30} responded`} />
+        <KpiTile label="Aktive" value={String(data.health.active)} hint={`af ${data.health.total} i alt`} />
+        <KpiTile label="Samtykke til undersøgelser" value={String(data.health.consented)} hint="givet til survey_contact" />
+        <KpiTile label="Afmeldte" value={String(data.health.unsubscribed)} />
+        <KpiTile label="Kan ikke leveres" value={String(data.health.undeliverable)} hint="bounce eller blokeret" />
+        <KpiTile label="Åbningsrate · 30 dage" value={openRate === null ? "—" : `${openRate} %`} hint={`${data.activity.sent30} sendt, ${data.activity.responded30} besvarede`} />
       </div>
 
       <Card>
@@ -78,11 +78,10 @@ export default async function PanelPage({
         <div className="mt-3">
           <PanelTable
             canEdit={can(session.role, "panel.edit")}
-            locale={session.locale}
             rows={data.rows.map((r) => ({
               id: r.id as string,
               externalId: r.external_id as string | null,
-              name: [r.first_name, r.last_name].filter(Boolean).join(" ") || "(anonymized)",
+              name: [r.first_name, r.last_name].filter(Boolean).join(" ") || "(anonymiseret)",
               email: (r.email as string | null) ?? "—",
               language: r.language as string,
               birthYear: r.birth_year as number | null,
@@ -99,7 +98,7 @@ export default async function PanelPage({
 
       {data.total > 500 && (
         <p className="text-xs text-muted">
-          Showing the first 500 matches. Narrow the filters to see the rest.
+          Viser de første 500 match. Indsnævr filtrene for at se resten.
         </p>
       )}
     </div>

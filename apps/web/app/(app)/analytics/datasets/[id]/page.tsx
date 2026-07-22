@@ -68,33 +68,33 @@ export default async function DatasetPage({
         title={dataset.name}
         description={
           <>
-            {dataset.source_kind}
-            {dataset.study_title && <> · from study “{dataset.study_title}”</>}
+            {dataset.source_kind === "derived" ? "afledt" : "studie"}
+            {dataset.study_title && <> · fra studiet “{dataset.study_title}”</>}
             {dataset.parent_id && (
-              <> · derived from <Link className="text-accent hover:underline" href={`/analytics/datasets/${dataset.parent_id}`}>{dataset.parent_name}</Link></>
+              <> · afledt af <Link className="text-accent hover:underline" href={`/analytics/datasets/${dataset.parent_id}`}>{dataset.parent_name}</Link></>
             )}
-            {" · owner "}{dataset.owner}
+            {" · ejer "}{dataset.owner}
           </>
         }
-        actions={<Link href="/analytics" className="text-sm text-accent hover:underline">← Analytics</Link>}
+        actions={<Link href="/analytics" className="text-sm text-accent hover:underline">← Analyse</Link>}
       />
 
-      <Card title="Versions & lineage">
+      <Card title="Versioner og afstamning">
         <Table>
           <thead>
-            <tr><Th>Version</Th><Th className="text-right">Rows</Th><Th className="text-right">Variables</Th><Th>Lineage</Th><Th>Created</Th></tr>
+            <tr><Th>Version</Th><Th className="text-right">Rækker</Th><Th className="text-right">Variabler</Th><Th>Afstamning</Th><Th>Oprettet</Th></tr>
           </thead>
           <tbody>
             {versions.map((v) => (
               <tr key={v.id} className={v.id === currentVersion?.id ? "bg-accent-soft/40" : undefined}>
                 <Td>
                   <Link href={`/analytics/datasets/${dataset.id}?v=${v.id}`} className="text-accent hover:underline">v{v.version_number}</Link>
-                  {v.id === currentVersion?.id && <Badge className="ml-2" tone="accent">viewing</Badge>}
+                  {v.id === currentVersion?.id && <Badge className="ml-2" tone="accent">vises nu</Badge>}
                 </Td>
                 <Td className="text-right tabular-nums">{v.row_count}</Td>
                 <Td className="text-right tabular-nums">{v.variable_count}</Td>
                 <Td><code className="text-xs text-muted">{JSON.stringify(v.lineage)}</code></Td>
-                <Td className="whitespace-nowrap text-muted">{fmtDateTime(v.created_at, session.locale)}</Td>
+                <Td className="whitespace-nowrap text-muted">{fmtDateTime(v.created_at)}</Td>
               </tr>
             ))}
           </tbody>
@@ -103,7 +103,6 @@ export default async function DatasetPage({
 
       {currentVersion && (
         <Workbench
-          datasetId={dataset.id}
           versionId={currentVersion.id as string}
           versionNumber={Number(currentVersion.version_number)}
           rowCount={Number(currentVersion.row_count)}
@@ -133,7 +132,7 @@ export default async function DatasetPage({
             version: `v${r.version_number}`,
             seed: r.seed === null ? null : Number(r.seed),
             author: r.author as string,
-            startedAt: fmtDateTime(r.started_at, session.locale),
+            startedAt: fmtDateTime(r.started_at),
             error: (r.error as string) ?? null,
             results: r.results ?? null,
           }))}

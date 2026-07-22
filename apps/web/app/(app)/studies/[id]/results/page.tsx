@@ -10,14 +10,23 @@ import {
   type Locale,
   type Question,
 } from "@ok/domain";
-import { Badge, Card, KpiTile, PageHeader } from "@/components/ui";
+import { Badge, Card, KpiTile, Table, Td, Th } from "@/components/ui";
 import { requireSession } from "@/lib/auth";
 import { withUser } from "@/lib/db";
-import { fmtNumber } from "@/lib/format";
+import { fmtDateTime, fmtNumber } from "@/lib/format";
+import { CHANNEL, QUESTION_TYPE, RESPONSE_STATUS, label } from "@/lib/labels";
 
-export default async function ResultsPage({ params }: { params: Promise<{ id: string }> }) {
+/** Resultat-fanen: aggregerede resultater pr. spørgsmål + individuelle besvarelser. */
+export default async function ResultsPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ status?: string }>;
+}) {
   const session = await requireSession();
   const { id } = await params;
+  const sp = await searchParams;
 
   const data = await withUser(session.userId, async (tx) => {
     const [study] = await tx`select id, title, status, draft_definition from studies where id = ${id}`;
@@ -39,12 +48,23 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
       select ie.question_code, ie.payload
       from interaction_events ie join responses r on r.id = ie.response_id
       where r.study_id = ${id} and ie.event_type = 'first_click'`;
-    return { study, version, answers, counts, clicks };
+    const rows = await tx`
+      select r.id, r.respondent_key, r.status, r.channel, r.started_at,
+             v.version_number, p.first_name, p.last_name, p.id as panelist_id,
+             (select value from response_answers ra where ra.response_id = r.id and ra.question_type = 'nps' limit 1) as nps
+      from responses r
+      join study_versions v on v.id = r.study_version_id
+      left join panelists p on p.id = r.panelist_id
+      where r.study_id = ${id}
+        and (${sp.status ?? null}::text is null or r.status = ${sp.status ?? null}::response_status)
+      order by r.started_at desc
+      limit 100`;
+    return { study, version, answers, counts, clicks, rows };
   });
   if (!data) notFound();
 
   const def = instrumentDefinition.parse(data.version?.definition ?? data.study.draft_definition);
-  const locale = (session.locale === "da" ? "da" : "en") as Locale;
+  const locale: Locale = "da";
   const questions = allQuestions(def);
 
   const byCode = new Map<string, unknown[]>();
@@ -66,21 +86,17 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title={`Results · ${data.study.title}`}
-        description={
-          data.version
-            ? `Instrument version v${data.version.version_number} · completed responses only`
-            : "Not published yet"
-        }
-        actions={<Link href={`/studies/${id}`} className="text-sm text-accent hover:underline">← Study</Link>}
-      />
+      <p className="text-sm text-muted">
+        {data.version
+          ? `Instrumentversion v${data.version.version_number} · aggregater beregnes kun på gennemførte besvarelser`
+          : "Ikke publiceret endnu"}
+      </p>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiTile label="Completed" value={String(completed)} />
-        <KpiTile label="Partial (drop-off)" value={String(data.counts.partial)} hint={`${dropOff}% of all started`} />
-        <KpiTile label="Disqualified" value={String(data.counts.disqualified)} />
-        <KpiTile label="All started" value={String(total)} />
+        <KpiTile label="Gennemførte" value={String(completed)} />
+        <KpiTile label="Påbegyndte (frafald)" value={String(data.counts.partial)} hint={`${dropOff} % af alle startede`} />
+        <KpiTile label="Frasorterede" value={String(data.counts.disqualified)} />
+        <KpiTile label="Alle startede" value={String(total)} />
       </div>
 
       {questions.map((q) => (
@@ -90,9 +106,71 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
           locale={locale}
           values={byCode.get(q.code) ?? []}
           clicks={clicksByCode.get(q.code) ?? []}
-          uiLocale={session.locale}
         />
       ))}
+
+      <Card title={`Individuelle besvarelser (${data.rows.length}${data.rows.length === 100 ? "+" : ""})`}>
+        <form className="mb-3 flex flex-wrap gap-2" action={`/studies/${id}/results`}>
+          <select
+            name="status"
+            defaultValue={sp.status ?? ""}
+            aria-label="Status"
+            className="h-9 rounded-full border border-line bg-surface px-3 text-sm"
+          >
+            <option value="">Alle statusser</option>
+            {Object.keys(RESPONSE_STATUS).map((s) => (
+              <option key={s} value={s}>{RESPONSE_STATUS[s]}</option>
+            ))}
+          </select>
+          <button
+            type="submit"
+            className="h-9 cursor-pointer rounded-full border border-line bg-surface px-4 text-sm transition-colors hover:border-accent/50 hover:text-accent"
+          >
+            Filtrér
+          </button>
+        </form>
+        <Table>
+          <thead>
+            <tr>
+              <Th>Respondent</Th><Th>Ver.</Th><Th>Status</Th>
+              <Th>NPS</Th><Th>Kanal</Th><Th>Påbegyndt</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.rows.map((r) => {
+              const nps = r.nps === null || r.nps === undefined ? null : Number(r.nps);
+              return (
+                <tr key={r.id}>
+                  <Td>
+                    {r.panelist_id ? (
+                      <Link href={`/panel/${r.panelist_id}`} className="text-accent hover:underline">
+                        {[r.first_name, r.last_name].filter(Boolean).join(" ") || "(anonymiseret)"}
+                      </Link>
+                    ) : (
+                      <span className="font-mono text-xs text-muted">{r.respondent_key}</span>
+                    )}
+                  </Td>
+                  <Td>v{r.version_number}</Td>
+                  <Td>
+                    <Badge tone={r.status === "completed" ? "green" : r.status === "disqualified" ? "gray" : "amber"}>
+                      {label(RESPONSE_STATUS, r.status)}
+                    </Badge>
+                  </Td>
+                  <Td>
+                    {nps === null ? "—" : (
+                      <Badge tone={nps >= 9 ? "green" : nps >= 7 ? "amber" : "red"}>{nps}</Badge>
+                    )}
+                  </Td>
+                  <Td>{label(CHANNEL, r.channel)}</Td>
+                  <Td className="whitespace-nowrap text-muted">{fmtDateTime(r.started_at)}</Td>
+                </tr>
+              );
+            })}
+            {data.rows.length === 0 && <tr><Td colSpan={6} className="text-muted">Ingen besvarelser matcher.</Td></tr>}
+          </tbody>
+        </Table>
+        {data.rows.length === 100 && <p className="mt-2 text-xs text-muted">Viser de seneste 100.</p>}
+      </Card>
     </div>
   );
 }
@@ -111,17 +189,16 @@ function Bar({ label, count, max, suffix }: { label: string; count: number; max:
 }
 
 function QuestionResult({
-  question, locale, values, clicks, uiLocale,
+  question, locale, values, clicks,
 }: {
   question: Question;
   locale: Locale;
   values: unknown[];
   clicks: Record<string, number>[];
-  uiLocale: string;
 }) {
   const title = (
     <span className="flex items-center gap-2">
-      <Badge>{question.type}</Badge>
+      <Badge>{label(QUESTION_TYPE, question.type)}</Badge>
       {lt(question.label, locale) || question.code}
       <span className="text-xs font-normal text-muted">n = {values.length}</span>
     </span>
@@ -140,11 +217,11 @@ function QuestionResult({
       return (
         <Card title={title}>
           <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <KpiTile label="NPS" value={r.score === null ? "—" : fmtNumber(r.score, uiLocale)}
-              hint={`(${r.promoters} − ${r.detractors}) / ${r.valid} valid · ${r.excluded} excluded`} />
-            <KpiTile label="Promoters (9-10)" value={`${r.promoters}`} tone="good" />
-            <KpiTile label="Passives (7-8)" value={`${r.passives}`} />
-            <KpiTile label="Detractors (0-6)" value={`${r.detractors}`} tone="bad" />
+            <KpiTile label="NPS" value={r.score === null ? "—" : fmtNumber(r.score)}
+              hint={`(${r.promoters} − ${r.detractors}) / ${r.valid} gyldige · ${r.excluded} udeladt`} />
+            <KpiTile label="Ambassadører (9-10)" value={`${r.promoters}`} tone="good" />
+            <KpiTile label="Passive (7-8)" value={`${r.passives}`} />
+            <KpiTile label="Kritikere (0-6)" value={`${r.detractors}`} tone="bad" />
           </div>
           <div className="space-y-1">
             {[...hist.entries()].map(([score, count]) => (
@@ -159,9 +236,9 @@ function QuestionResult({
       return (
         <Card title={title}>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <KpiTile label="CSAT (% 4-5)" value={r.score === null ? "—" : `${fmtNumber(r.score, uiLocale)}%`} hint={`${r.satisfied} of ${r.valid} valid`} />
-            <KpiTile label="Mean" value={r.mean === null ? "—" : fmtNumber(r.mean, uiLocale, 2)} />
-            <KpiTile label="Excluded" value={String(r.excluded)} />
+            <KpiTile label="CSAT (% 4-5)" value={r.score === null ? "—" : `${fmtNumber(r.score)} %`} hint={`${r.satisfied} af ${r.valid} gyldige`} />
+            <KpiTile label="Gennemsnit" value={r.mean === null ? "—" : fmtNumber(r.mean, 2)} />
+            <KpiTile label="Udeladt" value={String(r.excluded)} />
           </div>
         </Card>
       );
@@ -171,9 +248,9 @@ function QuestionResult({
       return (
         <Card title={title}>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <KpiTile label="Mean effort (1-7)" value={r.mean === null ? "—" : fmtNumber(r.mean, uiLocale, 2)} />
-            <KpiTile label="% low effort (5-7)" value={r.pctLowEffort === null ? "—" : `${fmtNumber(r.pctLowEffort, uiLocale)}%`} />
-            <KpiTile label="Valid / excluded" value={`${r.valid} / ${r.excluded}`} />
+            <KpiTile label="Gennemsnitlig indsats (1-7)" value={r.mean === null ? "—" : fmtNumber(r.mean, 2)} />
+            <KpiTile label="% lav indsats (5-7)" value={r.pctLowEffort === null ? "—" : `${fmtNumber(r.pctLowEffort)} %`} />
+            <KpiTile label="Gyldige / udeladt" value={`${r.valid} / ${r.excluded}`} />
           </div>
         </Card>
       );
@@ -220,9 +297,9 @@ function QuestionResult({
       return (
         <Card title={title}>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <KpiTile label="Mean" value={mean === null ? "—" : fmtNumber(mean, uiLocale, 2)} />
-            <KpiTile label="Median" value={median === null ? "—" : fmtNumber(median, uiLocale, 2)} />
-            <KpiTile label="Answers" value={String(nums.length)} />
+            <KpiTile label="Gennemsnit" value={mean === null ? "—" : fmtNumber(mean, 2)} />
+            <KpiTile label="Median" value={median === null ? "—" : fmtNumber(median, 2)} />
+            <KpiTile label="Svar" value={String(nums.length)} />
           </div>
         </Card>
       );
@@ -234,8 +311,8 @@ function QuestionResult({
       return (
         <Card title={title}>
           <div className="space-y-1">
-            <Bar label={locale === "da" ? "Ja" : "Yes"} count={yes} max={max} />
-            <Bar label={locale === "da" ? "Nej" : "No"} count={no} max={max} />
+            <Bar label="Ja" count={yes} max={max} />
+            <Bar label="Nej" count={no} max={max} />
           </div>
         </Card>
       );
@@ -252,7 +329,7 @@ function QuestionResult({
               const mean = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
               const scaleMax = Math.max(...(question.options ?? []).map((o) => Number(o.value ?? 0)), 5);
               return (
-                <Bar key={row.id} label={lt(row.label, locale)} count={Math.round(mean * 100) / 100} max={scaleMax} suffix=" avg" />
+                <Bar key={row.id} label={lt(row.label, locale)} count={Math.round(mean * 100) / 100} max={scaleMax} suffix=" gns." />
               );
             })}
           </div>
@@ -265,13 +342,13 @@ function QuestionResult({
       return (
         <Card title={title}>
           <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <KpiTile label="Clicks" value={String(clicks.length)} />
-            <KpiTile label="Median time to click" value={medianMs === null ? "—" : `${fmtNumber(medianMs / 1000, uiLocale, 1)} s`} />
+            <KpiTile label="Klik" value={String(clicks.length)} />
+            <KpiTile label="Mediantid til klik" value={medianMs === null ? "—" : `${fmtNumber(medianMs / 1000, 1)} s`} />
           </div>
           {question.imageUrl && (
             <div className="relative inline-block max-w-full">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={question.imageUrl} alt="Stimulus with click map" className="max-w-full rounded-md border border-line" />
+              <img src={question.imageUrl} alt="Stimulus med klikkort" className="max-w-full rounded-lg border border-line" />
               {clicks.map((c, i) => {
                 const left = (Number(c.x) / Number(c.naturalWidth || 1)) * 100;
                 const top = (Number(c.y) / Number(c.naturalHeight || 1)) * 100;
@@ -295,11 +372,11 @@ function QuestionResult({
         <Card title={title}>
           <ul className="space-y-1.5">
             {texts.map((t, i) => (
-              <li key={i} className="rounded-md border border-line bg-background px-3 py-1.5 text-sm">{t}</li>
+              <li key={i} className="rounded-lg border border-line bg-surface-raised px-3 py-1.5 text-sm">{t}</li>
             ))}
-            {texts.length === 0 && <li className="text-sm text-muted">No text answers.</li>}
+            {texts.length === 0 && <li className="text-sm text-muted">Ingen tekstsvar.</li>}
           </ul>
-          {values.length > 20 && <p className="mt-2 text-xs text-muted">Showing 20 of {values.length}.</p>}
+          {values.length > 20 && <p className="mt-2 text-xs text-muted">Viser 20 af {values.length}.</p>}
         </Card>
       );
     }

@@ -13,7 +13,7 @@ export function BuildDatasetButton({ studies }: { studies: { id: string; title: 
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Select aria-label="Study" value={studyId} onChange={(e) => setStudyId(e.target.value)}>
+      <Select aria-label="Studie" value={studyId} onChange={(e) => setStudyId(e.target.value)}>
         {studies.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
       </Select>
       <Button
@@ -25,12 +25,12 @@ export function BuildDatasetButton({ studies }: { studies: { id: string; title: 
               const res = await createDatasetFromStudy(studyId);
               router.push(`/analytics/datasets/${res.datasetId}`);
             } catch (e) {
-              setError(e instanceof Error ? e.message : "Failed to build the dataset.");
+              setError(e instanceof Error ? e.message : "Datasættet kunne ikke bygges.");
             }
           })
         }
       >
-        {pending ? "Building…" : "Build dataset"}
+        {pending ? "Bygger…" : "Byg datasæt"}
       </Button>
       {error && <span className="text-sm text-danger">{error}</span>}
     </div>

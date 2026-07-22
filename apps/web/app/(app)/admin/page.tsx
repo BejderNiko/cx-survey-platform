@@ -30,21 +30,21 @@ export default async function AdminPage() {
     <div className="space-y-4">
       <PageHeader
         title="Administration"
-        description={`${data.org?.name} · contact governance: cooldown ${governance.contactCooldownDays ?? 14} days, max ${governance.maxInviteSize ?? 500} invitations per send-out, ${governance.monthlyContactCap ?? 2} contacts per 30 days`}
+        description={`${data.org?.name} · kontaktregler: ${governance.contactCooldownDays ?? 14} dages karensperiode, maks. ${governance.maxInviteSize ?? 500} invitationer pr. udsendelse, ${governance.monthlyContactCap ?? 2} kontakter pr. 30 dage`}
       />
 
-      <Card title="Invite member">
+      <Card title="Invitér medlem">
         <InviteForm />
         <p className="mt-2 text-xs text-muted">
-          Local development creates the account directly with a one-time password. In production this
-          flows through Supabase Auth / Microsoft Entra ID (documented boundary, not yet enabled).
+          I lokal udvikling oprettes kontoen direkte med en engangsadgangskode. I produktion sker det
+          via Supabase Auth / Microsoft Entra ID (dokumenteret grænse, endnu ikke aktiveret).
         </p>
       </Card>
 
-      <Card title={`Members (${data.members.length})`}>
+      <Card title={`Medlemmer (${data.members.length})`}>
         <Table>
           <thead>
-            <tr><Th>Name</Th><Th>Email</Th><Th>Role</Th><Th>Status</Th><Th>Since</Th><Th /></tr>
+            <tr><Th>Navn</Th><Th>E-mail</Th><Th>Rolle</Th><Th>Status</Th><Th>Siden</Th><Th /></tr>
           </thead>
           <tbody>
             {data.members.map((m) => (
@@ -55,7 +55,7 @@ export default async function AdminPage() {
                 email={m.email as string}
                 role={m.role as string}
                 active={!m.deactivated_at}
-                since={fmtDateTime(m.created_at, session.locale)}
+                since={fmtDateTime(m.created_at)}
                 isSelf={m.user_id === session.userId}
               />
             ))}
@@ -63,10 +63,10 @@ export default async function AdminPage() {
         </Table>
       </Card>
 
-      <Card title="Audit log (latest 60)">
+      <Card title="Aktivitetslog (seneste 60)">
         <Table>
           <thead>
-            <tr><Th>Action</Th><Th>Entity</Th><Th>Actor</Th><Th>Details</Th><Th>When</Th></tr>
+            <tr><Th>Handling</Th><Th>Enhed</Th><Th>Udført af</Th><Th>Detaljer</Th><Th>Tidspunkt</Th></tr>
           </thead>
           <tbody>
             {data.auditEvents.map((a, i) => (
@@ -75,10 +75,10 @@ export default async function AdminPage() {
                 <Td>{a.entity_type}</Td>
                 <Td>{a.actor ?? "system"}</Td>
                 <Td><code className="text-xs text-muted">{JSON.stringify(a.details)}</code></Td>
-                <Td className="whitespace-nowrap text-muted">{fmtDateTime(a.created_at, session.locale)}</Td>
+                <Td className="whitespace-nowrap text-muted">{fmtDateTime(a.created_at)}</Td>
               </tr>
             ))}
-            {data.auditEvents.length === 0 && <tr><Td colSpan={5} className="text-muted">No audit events.</Td></tr>}
+            {data.auditEvents.length === 0 && <tr><Td colSpan={5} className="text-muted">Ingen hændelser i loggen.</Td></tr>}
           </tbody>
         </Table>
       </Card>

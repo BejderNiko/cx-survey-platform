@@ -68,9 +68,6 @@ const desktopShots = [
   ["/home", "home-desktop"],
   ["/panel", "panel-desktop"],
   ["/studies", "studies-desktop"],
-  ["/distributions", "distributions-desktop"],
-  ["/responses", "responses-desktop"],
-  ["/followup", "followup-desktop"],
   ["/insights", "insights-desktop"],
   ["/admin", "admin-desktop"],
 ];
@@ -87,11 +84,15 @@ allCritical.push(...(await axeScan(page, "admin")));
 
 // study results + builder + analytics workbench
 await page.goto("http://localhost:3000/studies?q=Relationel");
-const study = await page.locator("tbody a[href^='/studies/']").first().getAttribute("href");
+const study = await page.locator("a[href^='/studies/']:not([href='/studies'])").first().getAttribute("href");
 await page.goto("http://localhost:3000" + study);
 await page.waitForLoadState("networkidle");
 await page.screenshot({ path: `${OUT}/study-overview-desktop.png` });
 console.log("shot study-overview-desktop");
+await page.goto(`http://localhost:3000${study}/udsend`);
+await page.waitForLoadState("networkidle");
+await page.screenshot({ path: `${OUT}/study-udsend-desktop.png` });
+console.log("shot study-udsend-desktop");
 await page.goto(`http://localhost:3000${study}/results`);
 await page.waitForLoadState("networkidle");
 overflowOk = (await checkOverflow(page, "results")) && overflowOk;
@@ -104,7 +105,7 @@ await page.goto("http://localhost:3000" + ds);
 await page.selectOption("#wb-proc", "nps");
 await page.selectOption("#wb-variable", "nps_score");
 await page.selectOption("#wb-date_variable", "completed_at");
-await page.click("text=Run analysis");
+await page.click("text=Kør analyse");
 await page.waitForSelector("text=NPS trend by month", { timeout: 30000 });
 await page.waitForTimeout(1200); // let Plotly render
 await page.screenshot({ path: `${OUT}/analytics-workbench-desktop.png` });

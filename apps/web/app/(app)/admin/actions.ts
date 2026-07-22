@@ -8,7 +8,7 @@ import { withAuthorized, withIdentityAdminAuthorized } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 
 function assertRole(role: string): asserts role is Role {
-  if (!ROLES.includes(role as Role)) throw new Error(`Unknown role '${role}'`);
+  if (!ROLES.includes(role as Role)) throw new Error(`Ukendt rolle '${role}'`);
 }
 
 /**

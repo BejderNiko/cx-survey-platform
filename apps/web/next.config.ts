@@ -6,6 +6,14 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.join(__dirname, "../.."),
   },
+  async redirects() {
+    // Gamle sektioner er lagt sammen under /studies; Opfølgning er fjernet.
+    return [
+      { source: "/distributions", destination: "/studies", permanent: false },
+      { source: "/responses", destination: "/studies", permanent: false },
+      { source: "/followup", destination: "/home", permanent: false },
+    ];
+  },
   async headers() {
     return [{
       source: "/:path*",
@@ -22,6 +30,12 @@ const nextConfig: NextConfig = {
     serverActions: {
       // Panel import files are sent through server actions (limit checked again server-side).
       bodySizeLimit: "10mb",
+    },
+    // Klientens router-cache: genbrug netop besøgte sider i 30 s, så
+    // frem/tilbage-navigation føles øjeblikkelig i stedet for at vente på serveren.
+    staleTimes: {
+      dynamic: 30,
+      static: 180,
     },
   },
 };
