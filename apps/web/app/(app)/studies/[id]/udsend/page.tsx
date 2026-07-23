@@ -15,7 +15,7 @@ export default async function StudyDistributionPage({ params }: { params: Promis
   const session = await requireSession();
   const { id } = await params;
 
-  const data = await withUser(session.userId, async (tx) => {
+  const data = await withUser(session.userId, session.orgId, async (tx) => {
     const [study] = await tx`select id, status from studies where id = ${id}`;
     if (!study) return null;
     const [distributions, funnel, outbox, segments] = await Promise.all([

@@ -29,7 +29,7 @@ afterAll(async () => {
 
 describe("RLS execution roles", () => {
   it("user transactions execute as cx_app (never a privileged role)", async () => {
-    const currentUser = await asUser(app, null, async (tx) => {
+    const currentUser = await asUser(app, null, null, async (tx) => {
       const [row] = await tx`select current_user`;
       return row.current_user as string;
     });

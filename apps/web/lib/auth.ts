@@ -138,7 +138,7 @@ export async function withAuthorized<T>(
   fn: (tx: Tx, session: SessionUser) => Promise<T>,
 ): Promise<T> {
   const session = await requireSession();
-  return withUser(session.userId, async (tx) => {
+  return withUser(session.userId, session.orgId, async (tx) => {
     const current = await refreshSession(tx, session);
     assertCan(current.role, action);
     return fn(tx, current);

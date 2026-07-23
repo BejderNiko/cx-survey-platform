@@ -14,7 +14,7 @@ export default async function PanelPage({
   const session = await requireSession();
   const sp = await searchParams;
 
-  const data = await withUser(session.userId, async (tx) => {
+  const data = await withUser(session.userId, session.orgId, async (tx) => {
     let segment = null;
     if (sp.segment) {
       const [seg] = await tx`select definition from segments where id = ${sp.segment}`;
@@ -60,6 +60,7 @@ export default async function PanelPage({
         actions={
           <>
             <LinkButton href="/panel/segments">Segmenter</LinkButton>
+            <LinkButton href="/panel/recruitment">Rekruttering</LinkButton>
             {can(session.role, "panel.import") && <LinkButton href="/panel/import" variant="primary">Importér</LinkButton>}
           </>
         }

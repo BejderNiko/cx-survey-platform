@@ -28,7 +28,7 @@ export default async function ResultsPage({
   const { id } = await params;
   const sp = await searchParams;
 
-  const data = await withUser(session.userId, async (tx) => {
+  const data = await withUser(session.userId, session.orgId, async (tx) => {
     const [study] = await tx`select id, title, status, draft_definition from studies where id = ${id}`;
     if (!study) return null;
     const [version] = await tx`

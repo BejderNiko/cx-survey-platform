@@ -11,7 +11,7 @@ export default async function StudyPage({ params }: { params: Promise<{ id: stri
   const session = await requireSession();
   const { id } = await params;
 
-  const data = await withUser(session.userId, async (tx) => {
+  const data = await withUser(session.userId, session.orgId, async (tx) => {
     const [study] = await tx`select * from studies where id = ${id}`;
     if (!study) return null;
     const [versions, comments, respStats] = await Promise.all([

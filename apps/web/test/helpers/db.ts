@@ -37,6 +37,7 @@ export function adminDb(): postgres.Sql {
 export async function asUser<T>(
   app: postgres.Sql,
   userId: string | null,
+  orgId: string | null,
   fn: (tx: postgres.TransactionSql) => Promise<T>,
 ): Promise<T> {
   return app.begin(async (tx) => {
@@ -50,7 +51,7 @@ export async function asUser<T>(
           `Row-level security would not apply — refusing to count this as a valid check.`,
       );
     }
-    const claims = userId ? JSON.stringify({ sub: userId, role: "authenticated" }) : "{}";
+    const claims = userId && orgId ? JSON.stringify({ sub: userId, org_id: orgId, role: "authenticated" }) : "{}";
     await tx`select set_config('request.jwt.claims', ${claims}, true)`;
     return fn(tx);
   }) as Promise<T>;

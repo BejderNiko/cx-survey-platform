@@ -18,7 +18,7 @@ export default async function StudyLayout({
   const session = await requireSession();
   const { id } = await params;
 
-  const data = await withUser(session.userId, async (tx) => {
+  const data = await withUser(session.userId, session.orgId, async (tx) => {
     const [study] = await tx`
       select s.id, s.title, s.status, w.name as workspace, u.full_name as owner
       from studies s

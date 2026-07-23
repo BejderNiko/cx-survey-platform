@@ -10,7 +10,7 @@ export default async function SegmentsPage() {
   const session = await requireSession();
   const canManage = can(session.role, "segments.manage");
 
-  const data = await withUser(session.userId, async (tx) => {
+  const data = await withUser(session.userId, session.orgId, async (tx) => {
     const segments = await tx`
       select s.id, s.name, s.description, s.definition, s.created_at, u.full_name as author
       from segments s join users u on u.id = s.created_by

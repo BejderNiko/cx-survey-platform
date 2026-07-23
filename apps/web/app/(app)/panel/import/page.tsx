@@ -10,7 +10,7 @@ export default async function ImportPage() {
   const session = await requireSession();
   assertCan(session.role, "panel.import");
   const batches = await listBatches();
-  const attributeKeys = await withUser(session.userId, async (tx) => {
+  const attributeKeys = await withUser(session.userId, session.orgId, async (tx) => {
     const rows = await tx`select key, label from custom_fields order by key`;
     return rows.map((r) => ({ key: r.key as string, label: r.label as string }));
   });
