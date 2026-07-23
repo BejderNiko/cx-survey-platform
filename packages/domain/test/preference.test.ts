@@ -116,7 +116,7 @@ describe("preference test", () => {
     }
 
     for (const count of [1, 9]) {
-      const definition = instrumentDefinition.parse({
+      const result = instrumentDefinition.safeParse({
         ...preferenceDefinition,
         blocks: [{
           ...preferenceDefinition.blocks[0],
@@ -130,7 +130,7 @@ describe("preference test", () => {
           }],
         }],
       });
-      expect(validateInstrument(definition).join(" ")).toContain("mellem 2 og 8 billeder");
+      expect(result.success).toBe(false);
     }
   });
 });
