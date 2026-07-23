@@ -122,7 +122,6 @@ Read full files, not search snippets:
 
 - `supabase/migrations/20260716000001_tenancy_and_panel.sql`
 - `supabase/migrations/20260716000002_studies_distribution_responses.sql`
-- `supabase/migrations/20260716000003_analytics_insights.sql`
 - `supabase/migrations/20260716000004_rls.sql`
 - `supabase/local/auth_shim.sql`
 - `scripts/dev-db.sh`

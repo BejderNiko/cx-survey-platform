@@ -4,23 +4,29 @@ import { Card, KpiTile, LinkButton, Table, Td, Th } from "@/components/ui";
 import { requireSession } from "@/lib/auth";
 import { withUser } from "@/lib/db";
 import { fmtDateTime } from "@/lib/format";
-import { StudyActions, CommentForm } from "./study-actions";
+import { StudyActions } from "./study-actions";
+import { CommentsPanel, type StudyCommentRow } from "./comments-panel";
 
 /** Byg-fanen: status, instrument, versioner og kommentarer. */
 export default async function StudyPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   const { id } = await params;
 
-  const data = await withUser(session.userId, async (tx) => {
+  const data = await withUser(session.userId, session.orgId, async (tx) => {
     const [study] = await tx`select * from studies where id = ${id}`;
     if (!study) return null;
     const [versions, comments, respStats] = await Promise.all([
       tx`select v.id, v.version_number, v.published_at, u.full_name as publisher
          from study_versions v join users u on u.id = v.published_by
          where v.study_id = ${id} order by v.version_number desc`,
-      tx`select c.body, c.created_at, u.full_name as author
-         from comments c join users u on u.id = c.author_id
-         where c.entity_type = 'study' and c.entity_id = ${id} order by c.created_at desc limit 20`,
+      tx`select c.id, c.parent_id, c.question_code, c.body, c.status,
+                c.created_at::text, c.resolved_at::text, u.full_name as author,
+                resolver.full_name as resolved_by_name
+         from comments c
+         join users u on u.id = c.author_id
+         left join users resolver on resolver.id = c.resolved_by
+         where c.study_id = ${id}
+         order by c.created_at asc limit 200`,
       tx`select count(*) filter (where status = 'completed') as completed,
                 count(*) filter (where status = 'started') as partials,
                 count(*) filter (where status = 'disqualified') as disqualified
@@ -43,6 +49,7 @@ export default async function StudyPage({ params }: { params: Promise<{ id: stri
           canPublish={can(session.role, "studies.publish")}
           canClose={can(session.role, "studies.close")}
           canCreate={can(session.role, "studies.create")}
+          canDelete={can(session.role, "studies.delete")}
         />
         {can(session.role, "studies.edit") && (
           <LinkButton href={`/studies/${id}/builder`} variant="primary">
@@ -81,16 +88,11 @@ export default async function StudyPage({ params }: { params: Promise<{ id: stri
         </Card>
 
         <Card title="Kommentarer">
-          <CommentForm entityType="study" entityId={id} path={`/studies/${id}`} />
-          <ul className="mt-3 space-y-2">
-            {data.comments.map((c, i) => (
-              <li key={i} className="rounded-lg border border-line bg-surface-raised px-3 py-2 text-sm">
-                <p>{c.body}</p>
-                <p className="mt-0.5 text-xs text-muted">{c.author} · {fmtDateTime(c.created_at)}</p>
-              </li>
-            ))}
-            {data.comments.length === 0 && <li className="text-sm text-muted">Ingen kommentarer.</li>}
-          </ul>
+          <CommentsPanel
+            studyId={id}
+            comments={data.comments as unknown as StudyCommentRow[]}
+            canResolve={can(session.role, "comments.resolve")}
+          />
         </Card>
       </div>
     </div>

@@ -1,17 +1,22 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Button, Textarea } from "@/components/ui";
-import { addComment, duplicateStudy, publishStudy, setStudyStatus } from "../actions";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui";
+import { deleteStudy, duplicateStudy, publishStudy, setStudyStatus } from "../actions";
 
 export function StudyActions({
   studyId, status, canPublish, canClose, canCreate,
+  canDelete,
 }: {
   studyId: string; status: string; canPublish: boolean; canClose: boolean; canCreate: boolean;
+  canDelete: boolean;
 }) {
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
   const [problems, setProblems] = useState<string[]>([]);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -57,6 +62,38 @@ export function StudyActions({
           Duplikér
         </Button>
       )}
+      {canClose && status !== "archived" && (
+        <Button variant="secondary" disabled={pending}
+          onClick={() => startTransition(() => setStudyStatus(studyId, "archived"))}>
+          Arkivér
+        </Button>
+      )}
+      {canDelete && (
+        <Button
+          variant="secondary"
+          disabled={pending}
+          onClick={() => {
+            if (!window.confirm("Slet denne kladde permanent? Handlingen kan ikke fortrydes.")) return;
+            startTransition(async () => {
+              setActionError(null);
+              const res = await deleteStudy(studyId);
+              if (res.ok) {
+                router.push("/studies");
+                router.refresh();
+                return;
+              }
+              setActionError(res.reason);
+            });
+          }}
+        >
+          Slet studie
+        </Button>
+      )}
+      {actionError && (
+        <span role="alert" className="text-sm text-danger">
+          {actionError}
+        </span>
+      )}
       {msg && <span className="text-sm text-success">{msg}</span>}
       {problems.length > 0 && (
         <div role="alert" className="w-full rounded-lg border border-danger/30 bg-red-50 px-3 py-2 text-sm text-danger">
@@ -64,28 +101,6 @@ export function StudyActions({
           <ul className="list-disc pl-5">{problems.map((p, i) => <li key={i}>{p}</li>)}</ul>
         </div>
       )}
-    </div>
-  );
-}
-
-export function CommentForm({ entityType, entityId, path }: { entityType: string; entityId: string; path: string }) {
-  const [body, setBody] = useState("");
-  const [pending, startTransition] = useTransition();
-  return (
-    <div className="flex gap-2">
-      <Textarea rows={1} placeholder="Skriv en kommentar…" value={body} onChange={(e) => setBody(e.target.value)} aria-label="Kommentar" />
-      <Button
-        variant="secondary"
-        disabled={pending || !body.trim()}
-        onClick={() =>
-          startTransition(async () => {
-            await addComment(entityType, entityId, body, path);
-            setBody("");
-          })
-        }
-      >
-        Send
-      </Button>
     </div>
   );
 }

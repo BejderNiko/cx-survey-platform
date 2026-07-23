@@ -49,7 +49,7 @@ rejects `LOCAL_DATABASE_ENGINE=pglite` on Vercel Preview/Production and under
 | Responses | responses, response_answers, interaction_events | every response references the exact published study_version |
 | Follow-up | followup_rules, followup_cases, followup_activity, notifications | rule engine runs at response completion |
 | Datasets & analysis | datasets, dataset_versions, variables, transformation_recipes, analysis_recipes, analysis_runs, charts | derived datasets are new versions with lineage; raw responses never mutated |
-| Insights & collaboration | insights, evidence_links, comments, audit_events | evidence links back to studies/runs/datasets |
+| Collaboration & audit | comments, audit_events | threaded comments stay scoped to studies and questions |
 
 ## Security model (three layers)
 
@@ -75,8 +75,8 @@ issuance without touching callers (ADR-003).
 
 ## Instrument & metric versioning
 
-The survey instrument (blocks, 16 question types, display conditions,
-forward-only branch rules, da/en texts, messages) is a zod-validated JSONB
+The survey instrument (blocks, 17 question types, display conditions,
+forward-only branch rules, Danish-only mutable drafts, legacy da/en snapshot reading, and messages) is a zod-validated JSONB
 document. Publishing snapshots the draft into `study_versions` together with
 the **versioned metric definitions** (`nps@1`: 9-10/7-8/0-6,
 `% promoters − % detractors`; `csat@1`; `ces@1`) so later wording or banding

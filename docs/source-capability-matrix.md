@@ -94,8 +94,7 @@ brands, or assets are copied. All module names, IA, and UI are original OK desig
 | X2 | Audit log of imports, exports, publication, membership and permission changes | — | I — assumption; GDPR-driven requirement, not evidenced in crawls | MVP | Administration |
 | X3 | GDPR consent records, retention, irreversible anonymization; PII separated from research answers | — | I — assumption from product goal + Danish market (nps.today privacy pages confirm GDPR posture only) | MVP: consent + PII separation + anonymization; retention automation Later | Panel |
 | X4 | CSV/XLSX panel import with mapping, validation, dedup, dry run, error report | — | I — standard panel tooling; workflow design is ours | MVP | Panel |
-| X5 | Danish + English UI and survey variants | nps.today (da/en site pairs in crawl) | E (bilingual content exists) / I (in-product behavior) | MVP (survey language variants + locale-aware formatting; UI in English with da survey support) | All |
-| X6 | Insights repository linking findings to evidence | Lyssna | "UX Research Repository" — https://www.lyssna.com/blog/ux-research-repository/ | E (concept) | MVP-lite (insight records linked to studies/analyses); full-text search Later | Insights |
+| X5 | Danish-only new studies with legacy bilingual snapshot reading | nps.today (da/en site pairs in crawl) | E (bilingual content exists) / I (in-product behavior) | MVP (Danish authoring; immutable legacy versions remain readable) | Studies |
 
 ## Coverage summary
 

@@ -28,7 +28,7 @@ let userId: string;
 // explicit local `SET LOCAL ROLE cx_app` in PGlite mode) so these checks
 // never pass under a privileged role.
 async function asUser<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
-  return asUserWithRole(app, userId, (tx) => fn(tx as unknown as Tx));
+  return asUserWithRole(app, userId, orgId, (tx) => fn(tx as unknown as Tx));
 }
 
 beforeAll(async () => {

@@ -27,8 +27,7 @@ separate tools for panel management, UX research studies, operational CX
   21 statistical procedures with a full statistical contract, Plotly charts,
   reproducible saved recipes, CSV/XLSX/JSON/SPSS-.sav export with round-trip
   tests.
-- **Insights** — findings with decisions and evidence links; comments; audit
-  log; role-based administration.
+- **Collaboration & governance** — threaded study/question comments; audit log; role-based administration.
 
 See `docs/cx-platform-build-and-qa-plan.md` (unified roadmap + gates),
 `docs/github-vercel-implementation-runbook.md` (manual release steps),

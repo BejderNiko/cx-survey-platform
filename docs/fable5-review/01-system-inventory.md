@@ -63,7 +63,7 @@ Current hosted topology is incomplete. Vercel build works. Preview runtime has n
 | Responses | `responses`, `response_answers`, `interaction_events` | Server validates path, type, value, required state, finalization, and version |
 | Follow-up | `followup_rules`, `followup_cases`, `followup_activity`, `notifications` | Rules cannot cross org; respondent-triggered privileged writes remain bounded |
 | Datasets/analysis | `datasets`, `dataset_versions`, `variables`, `transformation_recipes`, `analysis_recipes`, `analysis_runs`, `charts` | Raw responses immutable; lineage, exclusions, seed, versions, and PII limits recorded |
-| Insights/collaboration | `insights`, `evidence_links`, `comments`, `audit_events` | Evidence links stay tenant-scoped; audit data does not retain prohibited PII |
+| Collaboration | `comments`, `audit_events` | Study/question threads stay tenant-scoped; audit data does not retain prohibited PII |
 
 ## Trust boundaries
 

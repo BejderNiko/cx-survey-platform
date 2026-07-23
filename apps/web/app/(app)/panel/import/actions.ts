@@ -13,6 +13,46 @@ import {
   type NormalizedRow,
 } from "@/lib/import/validate";
 
+/** Fixed import policy: first known column wins; custom fields use exact normalized keys. */
+const DEFAULT_COLUMN_MAP: Record<string, string> = {
+  external_id: "external_id", externalid: "external_id", ekstern_id: "external_id", kunde_id: "external_id", kundenummer: "external_id", customer_id: "external_id", id: "external_id",
+  first_name: "first_name", firstname: "first_name", fornavn: "first_name",
+  last_name: "last_name", lastname: "last_name", efternavn: "last_name",
+  email: "email", mail: "email", e_mail: "email", emailadresse: "email",
+  phone: "phone", telefon: "phone", mobile: "phone",
+  language: "language", sprog: "language", locale: "language",
+  birth_year: "birth_year", birthyear: "birth_year", foedselsaar: "birth_year",
+  gender: "gender", koen: "gender",
+  city: "city", by: "city",
+  postal_code: "postal_code", zip: "postal_code", postnummer: "postal_code",
+  country: "country", land: "country",
+  customer_status: "customer_status", status: "customer_status",
+  recruitment_source: "recruitment_source", source: "recruitment_source",
+};
+
+function normalizeColumn(column: string): string {
+  return column.trim().toLowerCase()
+    .replace(/æ/g, "ae").replace(/ø/g, "oe").replace(/å/g, "aa")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_");
+}
+
+async function fixedImportConfig(tx: Tx, columns: string[]) {
+  const customFields = await tx`select key from custom_fields order by key`;
+  const customKeys = new Set(customFields.map((field) => String(field.key)));
+  const usedTargets = new Set<string>();
+  const mapping: ImportMapping = {};
+  for (const column of columns) {
+    const normalized = normalizeColumn(column);
+    const target = DEFAULT_COLUMN_MAP[normalized]
+      ?? (customKeys.has(normalized) ? `attr:${normalized}` : "");
+    mapping[column] = target && !usedTargets.has(target) ? target : "";
+    if (mapping[column]) usedTargets.add(mapping[column]);
+  }
+  const dedupRule: DedupRule = usedTargets.has("external_id") ? "external_id" : "email";
+  return { mapping, dedupRule };
+}
+
 /**
  * Import wizard commands. The client keeps the file and re-sends it per step,
  * so the server stays stateless between steps; the batch row is created at
@@ -110,8 +150,6 @@ async function planImport(
 }
 
 export async function dryRunStep(formData: FormData) {
-  const mapping = JSON.parse(String(formData.get("mapping") ?? "{}")) as ImportMapping;
-  const dedupRule = (formData.get("dedupRule") as DedupRule) ?? "external_id";
   const consentConfirmed = formData.get("consentConfirmed") === "true";
   if (!consentConfirmed) throw new Error("Bekræft samtykkegrundlaget, før importen køres.");
 
@@ -119,6 +157,7 @@ export async function dryRunStep(formData: FormData) {
     const { buffer, name } = await fileFromForm(formData);
     const sheet = (formData.get("sheet") as string) || undefined;
     const parsed = await parseImportFile(buffer, name, sheet);
+    const { mapping, dedupRule } = await fixedImportConfig(tx, parsed.columns);
     const { validation, counts } = await planImport(tx, session.orgId, parsed.rows, mapping, dedupRule);
     const reviewBinding = { fileSha256: fileFingerprint(buffer), sheet: sheet ?? null };
 
@@ -138,25 +177,26 @@ export async function dryRunStep(formData: FormData) {
 }
 
 export async function commitStep(formData: FormData) {
-  const mapping = JSON.parse(String(formData.get("mapping") ?? "{}")) as ImportMapping;
-  const dedupRule = (formData.get("dedupRule") as DedupRule) ?? "external_id";
+  const consentConfirmed = formData.get("consentConfirmed") === "true";
+  if (!consentConfirmed) throw new Error("Bekræft samtykkegrundlaget, før importen gennemføres.");
   const batchId = String(formData.get("batchId") ?? "");
-  if (!batchId) throw new Error("Kør prøvekørslen først.");
+  if (!batchId) throw new Error("Kør valideringen først.");
 
   const result = await withAuthorized("panel.import", async (tx, session) => {
     const { buffer, name } = await fileFromForm(formData);
     const sheet = (formData.get("sheet") as string) || undefined;
+    const parsed = await parseImportFile(buffer, name, sheet);
+    const { mapping, dedupRule } = await fixedImportConfig(tx, parsed.columns);
     const [batch] = await tx`
       select counts from import_batches
       where id = ${batchId} and status = 'dry_run' and filename = ${name}
         and mapping = ${tx.json(mapping as never)} and dedup_rule = ${dedupRule}
       for update`;
-    if (!batch) throw new Error("Prøvekørslen svarer ikke længere til denne import.");
+    if (!batch) throw new Error("Valideringen svarer ikke længere til denne import.");
     const storedBinding = batch.counts as { fileSha256?: string; sheet?: string | null };
     if (storedBinding.fileSha256 !== fileFingerprint(buffer) || storedBinding.sheet !== (sheet ?? null)) {
-      throw new Error("Filen eller arket er ændret efter prøvekørslen. Kør gennemgangen igen, før du gennemfører.");
+      throw new Error("Filen eller arket er ændret efter valideringen. Vælg filen igen.");
     }
-    const parsed = await parseImportFile(buffer, name, sheet);
     const { validation, counts, creates, updates } = await planImport(tx, session.orgId, parsed.rows, mapping, dedupRule);
     if (!samePlanCounts(batch.counts as Record<string, unknown>, counts)) {
       throw new Error("Paneldata er ændret efter prøvekørslen. Kør gennemgangen igen, før du gennemfører.");

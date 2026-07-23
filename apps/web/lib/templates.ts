@@ -1,8 +1,8 @@
-import type { InstrumentDefinitionInput } from "@ok/domain";
+import { instrumentDefinition, toDanishDraft, type InstrumentDefinitionInput } from "@ok/domain";
 
 /**
- * Built-in study templates (org_id null in the templates table). All content
- * is original OK wording with Danish and English variants.
+ * Built-in study templates (org_id null in the templates table). Exported
+ * definitions are normalized to Danish-only authoring.
  */
 
 export interface BuiltInTemplate {
@@ -14,7 +14,7 @@ export interface BuiltInTemplate {
 }
 
 const base = {
-  languages: ["da", "en"] as ("da" | "en")[],
+  languages: ["da"] as ("da" | "en")[],
   defaultLanguage: "da" as const,
 };
 
@@ -84,7 +84,7 @@ const messages = {
   },
 };
 
-export const BUILT_IN_TEMPLATES: BuiltInTemplate[] = [
+const TEMPLATE_SOURCES: BuiltInTemplate[] = [
   {
     key: "relational_nps",
     name: "Relationel NPS / Relational NPS",
@@ -389,3 +389,8 @@ export const BUILT_IN_TEMPLATES: BuiltInTemplate[] = [
     },
   },
 ];
+
+export const BUILT_IN_TEMPLATES: BuiltInTemplate[] = TEMPLATE_SOURCES.map((template) => ({
+  ...template,
+  definition: toDanishDraft(instrumentDefinition.parse(template.definition)),
+}));

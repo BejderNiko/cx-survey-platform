@@ -17,6 +17,11 @@ export function PublicRuntime({
   language?: string | null;
 }) {
   const responseIdPromise = useRef<Promise<string | null> | null>(null);
+  const requestedLanguage = language === "en" || language === "da" ? language : null;
+  const resolvedLanguage: Locale = requestedLanguage && definition.languages.includes(requestedLanguage)
+    ? requestedLanguage
+    : definition.defaultLanguage;
+
 
   const ensureStarted = useCallback((): Promise<string | null> => {
     if (responseIdPromise.current) return responseIdPromise.current;
@@ -25,7 +30,7 @@ export function PublicRuntime({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         token,
-        language: language === "en" ? "en" : "da",
+        language: resolvedLanguage,
         viewport: typeof window !== "undefined" && window.innerWidth < 640 ? "mobile" : "desktop",
       }),
     })
@@ -37,7 +42,7 @@ export function PublicRuntime({
       if (!responseId && responseIdPromise.current === pending) responseIdPromise.current = null;
     });
     return pending;
-  }, [token, language]);
+  }, [token, resolvedLanguage]);
 
   const onComplete = useCallback(
     async (result: {
@@ -76,10 +81,11 @@ export function PublicRuntime({
     >
       <SurveyRenderer
         definition={definition}
-        locale={(language === "en" ? "en" : language === "da" ? "da" : undefined) as Locale | undefined}
+        locale={resolvedLanguage}
         mode="live"
         studyTitle={studyTitle}
         onComplete={onComplete}
+        assetToken={token}
       />
     </div>
   );

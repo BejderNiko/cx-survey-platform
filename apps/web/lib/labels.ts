@@ -97,11 +97,6 @@ export const RUN_STATUS: Record<string, string> = {
   queued: "I kø",
 };
 
-export const INSIGHT_STATUS: Record<string, string> = {
-  draft: "Kladde",
-  validated: "Valideret",
-  archived: "Arkiveret",
-};
 
 export const ROLE_LABEL: Record<string, string> = {
   owner: "Ejer",
@@ -151,6 +146,7 @@ export const QUESTION_TYPE: Record<string, string> = {
   ranking: "Rangering",
   matrix: "Matrix",
   first_click: "Første klik",
+  preference_test: "Præferencetest",
 };
 
 export const VAR_TYPE: Record<string, string> = {

@@ -14,7 +14,7 @@ export default async function PanelPage({
   const session = await requireSession();
   const sp = await searchParams;
 
-  const data = await withUser(session.userId, async (tx) => {
+  const data = await withUser(session.userId, session.orgId, async (tx) => {
     let segment = null;
     if (sp.segment) {
       const [seg] = await tx`select definition from segments where id = ${sp.segment}`;

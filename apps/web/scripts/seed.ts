@@ -27,6 +27,7 @@ import {
   evaluateRules,
   instrumentDefinition,
   mulberry32,
+  toDanishDraft,
   randomSample,
   type InstrumentDefinition,
 } from "@ok/domain";
@@ -456,7 +457,7 @@ async function main() {
   console.log(`  follow-up: ${caseCount} cases from rule engine`);
 
   // ---- Study 2: First-click test (live) ----
-  const fcDef: InstrumentDefinition = instrumentDefinition.parse({
+  const fcDef: InstrumentDefinition = toDanishDraft(instrumentDefinition.parse({
     languages: ["da", "en"],
     defaultLanguage: "da",
     blocks: [
@@ -492,7 +493,7 @@ async function main() {
       intro: { da: "Du får vist et skærmbillede og en opgave. Klik dér, hvor du ville klikke først.", en: "You will see a screen and a task. Click where you would click first." },
       thankYou: { da: "Tak for hjælpen!", en: "Thanks for your help!" },
     },
-  });
+  }));
   const [study2] = await sql`
     insert into studies (org_id, workspace_id, title, description, study_type, method_tags, status, owner_id, draft_definition)
     values (${orgA.id}, ${wsIns.id}, 'First-click: Webshop checkout',
@@ -590,19 +591,20 @@ async function main() {
   }
   console.log(`  dataset: ${built.rows.length} rows × ${built.variables.length} variables`);
 
-  // ---- Insight + comments ----
-  const [insight] = await sql`
-    insert into insights (org_id, title, summary, status, decision, owner_id, tags)
-    values (${orgA.id}, 'Ventetid i kundeservice driver detractor-scorer',
-            'En stor andel af detractor-besvarelser i Relationel NPS 2026 H2 nævner ventetid på telefonen. Mønsteret er tydeligst blandt el-kunder.',
-            'draft', 'Anbefaling: mål ventetid som KPI og genmål NPS i Q4.', ${users.analyst}, '{nps,kundeservice}')
+  // ---- Study comments ----
+  const [studyComment] = await sql`
+    insert into comments (org_id, entity_type, entity_id, study_id, author_id, body)
+    values (${orgA.id}, 'study', ${study1.id}, ${study1.id}, ${users.owner},
+            'Flot svarprocent — lad os fastholde kadencen.')
     returning id`;
-  await sql`insert into evidence_links (org_id, insight_id, entity_type, entity_id, note) values
-    (${orgA.id}, ${insight.id}, 'study', ${study1.id}, 'Kildestudie'),
-    (${orgA.id}, ${insight.id}, 'dataset_version', ${dsv.id}, 'Datasæt v1 bag analysen')`;
-  await sql`insert into comments (org_id, entity_type, entity_id, author_id, body) values
-    (${orgA.id}, 'study', ${study1.id}, ${users.owner}, 'Flot svarprocent — lad os fastholde kadencen.'),
-    (${orgA.id}, 'insight', ${insight.id}, ${users.researcher}, 'Stemmer med de åbne svar; jeg tagger citaterne.')`;
+  await sql`
+    insert into comments (org_id, entity_type, entity_id, study_id, parent_id, author_id, body)
+    values (${orgA.id}, 'study', ${study1.id}, ${study1.id}, ${studyComment.id}, ${users.researcher},
+            'Enig. Jeg følger op efter næste udsendelse.')`;
+  await sql`
+    insert into comments (org_id, entity_type, entity_id, study_id, question_code, author_id, body)
+    values (${orgA.id}, 'study', ${study1.id}, ${study1.id}, 'nps_score', ${users.researcher},
+            'Skal hjælpeteksten præcisere 0-10-skalaen?')`;
 
   // ---- Audit trail for the seed itself ----
   await sql`insert into audit_events (org_id, actor_user_id, action, entity_type, entity_id, details) values

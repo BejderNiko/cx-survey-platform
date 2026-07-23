@@ -66,8 +66,8 @@ export const adminSql: Sql = lazySql(
 
 export type Tx = TransactionSql;
 
-/** Run `fn` in a transaction with RLS scoped to `userId`. */
-export async function withUser<T>(userId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
+/** Run `fn` in a transaction with RLS scoped to one active organization. */
+export async function withUser<T>(userId: string, orgId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
   return appSql.begin(async (tx) => {
     if (env.localDatabaseEngine === "pglite") {
       // PGlite-only mitigation: the PGlite socket server executes every
@@ -80,7 +80,7 @@ export async function withUser<T>(userId: string, fn: (tx: Tx) => Promise<T>): P
       // login role itself is the RLS subject.
       await tx`set local role cx_app`;
     }
-    const claims = JSON.stringify({ sub: userId, role: "authenticated" });
+    const claims = JSON.stringify({ sub: userId, org_id: orgId, role: "authenticated" });
     await tx`select set_config('request.jwt.claims', ${claims}, true)`;
     return fn(tx);
   }) as Promise<T>;

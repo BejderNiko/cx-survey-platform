@@ -1,4 +1,4 @@
-import { assertCan } from "@ok/domain";
+import { can } from "@ok/domain";
 import { Badge, Card, PageHeader, Table, Td, Th } from "@/components/ui";
 import { requireSession } from "@/lib/auth";
 import { withUser } from "@/lib/db";
@@ -7,9 +7,18 @@ import { MemberRow, InviteForm } from "./admin-ui";
 
 export default async function AdminPage() {
   const session = await requireSession();
-  assertCan(session.role, "members.invite");
+  if (!can(session.role, "members.invite")) {
+    return (
+      <div className="mx-auto mt-16 max-w-md rounded-xl border border-line bg-surface p-6 text-center shadow-card">
+        <h1 className="font-display text-lg text-heading">Ingen adgang</h1>
+        <p className="mt-2 text-sm text-muted">
+          Din rolle har ikke adgang til denne side. Kontakt en administrator, hvis du mener, du burde have det.
+        </p>
+      </div>
+    );
+  }
 
-  const data = await withUser(session.userId, async (tx) => {
+  const data = await withUser(session.userId, session.orgId, async (tx) => {
     const members = await tx`
       select m.id as membership_id, m.role, m.created_at, m.deactivated_at,
              u.id as user_id, u.email, u.full_name

@@ -12,7 +12,7 @@ import { ProfileActions } from "./profile-actions";
 export default async function PanelistProfilePage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   const { id } = await params;
-  const profile = await withUser(session.userId, (tx) => getPanelistProfile(tx, id));
+  const profile = await withUser(session.userId, session.orgId, (tx) => getPanelistProfile(tx, id));
   if (!profile) notFound();
   const p = profile.panelist;
   const name = [p.first_name, p.last_name].filter(Boolean).join(" ") || "(anonymiseret)";

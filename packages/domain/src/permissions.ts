@@ -27,6 +27,7 @@ export const ACTIONS = [
   "panel.export",
   "panel.anonymize",
   "segments.manage",
+  "recruitment.manage",
   // studies
   "studies.view",
   "studies.create",
@@ -47,10 +48,9 @@ export const ACTIONS = [
   "analytics.run",
   "datasets.create",
   "datasets.export",
-  // insights & collaboration
-  "insights.view",
-  "insights.manage",
+  // collaboration
   "comments.create",
+  "comments.resolve",
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -61,19 +61,18 @@ const VIEW_ACTIONS: Action[] = [
   "responses.view",
   "followup.view",
   "analytics.view",
-  "insights.view",
 ];
 
 const RESEARCH_ACTIONS: Action[] = [
   ...VIEW_ACTIONS,
   "comments.create",
+  "comments.resolve",
   "studies.create",
   "studies.edit",
   "studies.publish",
   "studies.close",
   "distributions.create",
   "followup.manage",
-  "insights.manage",
   "analytics.run",
 ];
 
@@ -89,6 +88,7 @@ const MATRIX: Record<Role, ReadonlySet<Action>> = {
     "panel.export",
     "panel.anonymize",
     "segments.manage",
+    "recruitment.manage",
     "distributions.create",
   ]),
   analyst: new Set([
@@ -98,7 +98,6 @@ const MATRIX: Record<Role, ReadonlySet<Action>> = {
     "datasets.create",
     "datasets.export",
     "panel.export",
-    "insights.manage",
   ]),
   viewer: new Set([...VIEW_ACTIONS, "comments.create"]),
 };
