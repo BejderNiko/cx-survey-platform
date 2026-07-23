@@ -12,7 +12,7 @@ export default async function AnalyticsPage() {
   const session = await requireSession();
   const health = await analyticsHealth();
 
-  const data = await withUser(session.userId, async (tx) => {
+  const data = await withUser(session.userId, session.orgId, async (tx) => {
     const datasets = await tx`
       select d.id, d.name, d.description, d.source_kind, d.created_at, u.full_name as owner,
              s.title as study_title,

@@ -18,7 +18,7 @@ export default async function DatasetPage({
   const { id } = await params;
   const sp = await searchParams;
 
-  const data = await withUser(session.userId, async (tx) => {
+  const data = await withUser(session.userId, session.orgId, async (tx) => {
     const [dataset] = await tx`
       select d.*, u.full_name as owner, s.title as study_title, pd.name as parent_name, pd.id as parent_id
       from datasets d

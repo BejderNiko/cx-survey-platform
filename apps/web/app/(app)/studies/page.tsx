@@ -16,7 +16,7 @@ export default async function StudiesPage({
   const session = await requireSession();
   const sp = await searchParams;
 
-  const data = await withUser(session.userId, async (tx) => {
+  const data = await withUser(session.userId, session.orgId, async (tx) => {
     const like = sp.q ? "%" + sp.q + "%" : null;
     const studies = await tx`
       select s.id, s.title, s.status, s.study_type, s.method_tags, s.updated_at,

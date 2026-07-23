@@ -22,7 +22,7 @@ export default async function HomePage() {
   const session = await requireSession();
   const firstName = session.fullName.split(/\s+/)[0] ?? session.fullName;
 
-  const data = await withUser(session.userId, async (tx) => {
+  const data = await withUser(session.userId, session.orgId, async (tx) => {
     const [liveStudies, respStats, panelStats, recentRuns, npsValues, recentResponses] =
       await Promise.all([
         tx`select s.id, s.title, s.status, s.study_type,

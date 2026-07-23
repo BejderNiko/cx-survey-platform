@@ -164,8 +164,11 @@ export async function completeResponse(input: CompleteInput): Promise<{ ok: bool
       from responses r
       join study_versions v on v.id = r.study_version_id
       join distributions d on d.id = r.distribution_id
+      join studies s on s.id = r.study_id
       left join invitations i on i.id = r.invitation_id
       where r.id = ${input.responseId}
+        and s.status = 'live'
+        and d.status = 'active'
         and (
           (r.invitation_id is not null and i.token = ${input.token}
             and i.status in ('sent', 'delivered', 'opened', 'clicked', 'started'))

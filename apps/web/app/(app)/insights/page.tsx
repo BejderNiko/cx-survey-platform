@@ -16,7 +16,7 @@ export default async function InsightsPage({
   const session = await requireSession();
   const sp = await searchParams;
 
-  const data = await withUser(session.userId, async (tx) => {
+  const data = await withUser(session.userId, session.orgId, async (tx) => {
     const like = sp.q ? "%" + sp.q + "%" : null;
     const insights = await tx`
       select i.*, u.full_name as owner

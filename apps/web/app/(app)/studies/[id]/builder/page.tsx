@@ -8,7 +8,7 @@ export default async function BuilderPage({ params }: { params: Promise<{ id: st
   const session = await requireSession();
   assertCan(session.role, "studies.edit");
   const { id } = await params;
-  const study = await withUser(session.userId, async (tx) => {
+  const study = await withUser(session.userId, session.orgId, async (tx) => {
     const [row] = await tx`select id, title, status, draft_definition from studies where id = ${id}`;
     return row ?? null;
   });

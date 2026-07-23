@@ -9,7 +9,7 @@ export default async function AdminPage() {
   const session = await requireSession();
   assertCan(session.role, "members.invite");
 
-  const data = await withUser(session.userId, async (tx) => {
+  const data = await withUser(session.userId, session.orgId, async (tx) => {
     const members = await tx`
       select m.id as membership_id, m.role, m.created_at, m.deactivated_at,
              u.id as user_id, u.email, u.full_name
