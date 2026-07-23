@@ -336,6 +336,36 @@ function QuestionResult({
         </Card>
       );
     }
+    case "preference_test": {
+      const counts = new Map<string, number>();
+      for (const value of values) {
+        if (value && typeof value === "object") {
+          const selectedId = String((value as Record<string, unknown>).selectedId ?? "");
+          if (selectedId) counts.set(selectedId, (counts.get(selectedId) ?? 0) + 1);
+        }
+      }
+      const valid = [...counts.values()].reduce((sum, count) => sum + count, 0);
+      const max = Math.max(...counts.values(), 1);
+      return (
+        <Card title={title}>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {(question.stimuli ?? []).map((stimulus) => {
+              const count = counts.get(stimulus.id) ?? 0;
+              const share = valid > 0 ? Math.round((count / valid) * 1000) / 10 : 0;
+              return (
+                <div key={stimulus.id} className="min-w-0 rounded-lg border border-line p-3">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={`/api/stimuli/${stimulus.assetId}`} alt={stimulus.altText} className="h-40 w-full max-w-full object-contain" />
+                  <div className="mt-2">
+                    <Bar label={stimulus.altText} count={count} max={max} suffix={` (${fmtNumber(share, 1)} %)`} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      );
+    }
     case "first_click": {
       const times = clicks.map((c) => Number(c.elapsedMs)).filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
       const medianMs = times.length ? times[Math.floor((times.length - 1) / 2)] : null;
@@ -345,10 +375,14 @@ function QuestionResult({
             <KpiTile label="Klik" value={String(clicks.length)} />
             <KpiTile label="Mediantid til klik" value={medianMs === null ? "—" : `${fmtNumber(medianMs / 1000, 1)} s`} />
           </div>
-          {question.imageUrl && (
+          {(question.stimulus || question.imageUrl) && (
             <div className="relative inline-block max-w-full">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={question.imageUrl} alt="Stimulus med klikkort" className="max-w-full rounded-lg border border-line" />
+              <img
+                src={question.stimulus ? `/api/stimuli/${question.stimulus.assetId}` : question.imageUrl}
+                alt={question.stimulus?.altText ?? "Stimulus med klikkort"}
+                className="max-w-full rounded-lg border border-line"
+              />
               {clicks.map((c, i) => {
                 const left = (Number(c.x) / Number(c.naturalWidth || 1)) * 100;
                 const top = (Number(c.y) / Number(c.naturalHeight || 1)) * 100;

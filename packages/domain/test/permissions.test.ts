@@ -44,4 +44,15 @@ describe("permission policy", () => {
     expect(() => assertCan("viewer", "studies.edit")).toThrow(PermissionError);
     expect(() => assertCan("owner", "studies.edit")).not.toThrow();
   });
+
+  it("only owner-level roles can hard-delete studies", () => {
+    expect(can("owner", "studies.delete")).toBe(true);
+    expect(can("researcher", "studies.delete")).toBe(false);
+    expect(can("viewer", "studies.delete")).toBe(false);
+  });
+
+  it("researchers can resolve comment threads but viewers cannot", () => {
+    expect(can("researcher", "comments.resolve")).toBe(true);
+    expect(can("viewer", "comments.resolve")).toBe(false);
+  });
 });

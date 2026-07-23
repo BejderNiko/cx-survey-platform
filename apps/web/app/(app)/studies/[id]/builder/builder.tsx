@@ -2,20 +2,23 @@
 
 import { useMemo, useState, useTransition } from "react";
 import {
-  QUESTION_TYPES,
+  groupedQuestionTypes,
+  QUESTION_TYPE_METADATA,
   validateInstrument,
   type InstrumentDefinition,
-  type Locale,
   type Question,
 } from "@ok/domain";
 import { Badge, Button, Input, Label, Select, Textarea, cn } from "@/components/ui";
 import { SurveyRenderer } from "@/components/survey/renderer";
-import { QUESTION_TYPE, label as dkLabel } from "@/lib/labels";
 import { updateDraft } from "../../actions";
+import { StimulusEditor } from "./stimulus-editor";
+import { CommentsPanel, type StudyCommentRow } from "../comments-panel";
 
 /** Kladdeeditor til instrumentet: spørgsmålsliste, editor pr. spørgsmål, logik, forhåndsvisning. */
 
 const CONDITION_OPS = ["eq", "ne", "lt", "lte", "gt", "gte", "answered"] as const;
+const QUESTION_GROUPS = groupedQuestionTypes();
+
 
 const OP_LABEL: Record<string, string> = {
   eq: "er lig med",
@@ -33,15 +36,20 @@ const nextId = (prefix: string) => `${prefix}${Date.now().toString(36)}${(uid++)
 export function Builder({
   studyId,
   initialDefinition,
+  initialComments,
+  canResolveComments,
 }: {
   studyId: string;
   initialDefinition: InstrumentDefinition;
+  initialComments: StudyCommentRow[];
+  canResolveComments: boolean;
 }) {
   const [def, setDef] = useState<InstrumentDefinition>(initialDefinition);
   const [selected, setSelected] = useState<string | null>(def.blocks[0]?.questions[0]?.code ?? null);
   const [dirty, setDirty] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile" | null>(null);
+  const [newType, setNewType] = useState<Question["type"]>("nps");
   const [pending, startTransition] = useTransition();
 
   const questions = useMemo(() => def.blocks.flatMap((b) => b.questions), [def]);
@@ -75,24 +83,24 @@ export function Builder({
     const q: Question = {
       code,
       type,
-      label: { da: "", en: "" },
-      required: false,
+      label: { da: "" },
+      required: type === "preference_test",
       ...(needsOptions(type)
         ? {
             options: [
-              { id: "opt1", label: { da: "Mulighed 1", en: "Option 1" }, ...(type === "likert" ? { value: 1 } : {}) },
-              { id: "opt2", label: { da: "Mulighed 2", en: "Option 2" }, ...(type === "likert" ? { value: 2 } : {}) },
+              { id: "opt1", label: { da: "Mulighed 1" }, ...(type === "likert" ? { value: 1 } : {}) },
+              { id: "opt2", label: { da: "Mulighed 2" }, ...(type === "likert" ? { value: 2 } : {}) },
             ],
           }
         : {}),
       ...(type === "rating" ? { scale: { min: 1, max: 5 } } : {}),
       ...(type === "matrix"
         ? {
-            rows: [{ id: "row1", label: { da: "Række 1", en: "Row 1" } }],
+            rows: [{ id: "row1", label: { da: "Række 1" } }],
             options: [
-              { id: "1", label: { da: "1", en: "1" }, value: 1 },
-              { id: "2", label: { da: "2", en: "2" }, value: 2 },
-              { id: "3", label: { da: "3", en: "3" }, value: 3 },
+              { id: "1", label: { da: "1" }, value: 1 },
+              { id: "2", label: { da: "2" }, value: 2 },
+              { id: "3", label: { da: "3" }, value: 3 },
             ],
           }
         : {}),
@@ -149,17 +157,6 @@ export function Builder({
             <option value="mobile">Mobil (375 px)</option>
           </Select>
         )}
-        <label className="ml-2 flex items-center gap-1 text-sm">
-          Standardsprog
-          <Select
-            aria-label="Standardsprog"
-            value={def.defaultLanguage}
-            onChange={(e) => mutate((d) => { d.defaultLanguage = e.target.value as Locale; })}
-          >
-            <option value="da">dansk</option>
-            <option value="en">engelsk</option>
-          </Select>
-        </label>
         {saveMsg && <span className="text-sm text-success">{saveMsg}</span>}
         {problems.length > 0 && <Badge tone="amber">{problems.length} valideringsproblem(er)</Badge>}
       </div>
@@ -171,9 +168,20 @@ export function Builder({
         </details>
       )}
 
+      {!previewMode && (
+        <StimulusEditor
+          studyId={studyId}
+          kind="context"
+          label="Fast kontekstbillede for studiet"
+          value={def.contextStimulus ?? null}
+          onChange={(contextStimulus) => mutate((draft) => { draft.contextStimulus = contextStimulus; })}
+          onRemove={() => mutate((draft) => { delete draft.contextStimulus; })}
+        />
+      )}
+
       {previewMode ? (
         <div className="rounded-xl border border-line bg-background p-4">
-          <div className={cn("mx-auto", previewMode === "mobile" ? "max-w-[375px]" : "max-w-2xl")}>
+          <div className={cn("mx-auto", previewMode === "mobile" ? "max-w-[375px]" : "max-w-6xl")}>
             <SurveyRenderer key={JSON.stringify(def).length} definition={def} mode="preview" />
           </div>
         </div>
@@ -190,8 +198,8 @@ export function Builder({
                   )}>
                   <button className="flex-1 truncate text-left cursor-pointer" onClick={() => setSelected(q.code)}>
                     <span className="mr-1.5 text-xs text-muted">{i + 1}.</span>
-                    <Badge className="mr-1.5">{dkLabel(QUESTION_TYPE, q.type)}</Badge>
-                    {q.label[def.defaultLanguage] || q.code}
+                    <Badge className="mr-1.5">{QUESTION_TYPE_METADATA[q.type].name}</Badge>
+                    {q.label.da || q.code}
                   </button>
                   <button aria-label={`Flyt ${q.code} op`} className="px-1 text-muted hover:text-foreground cursor-pointer" onClick={() => move(q.code, -1)}>↑</button>
                   <button aria-label={`Flyt ${q.code} ned`} className="px-1 text-muted hover:text-foreground cursor-pointer" onClick={() => move(q.code, 1)}>↓</button>
@@ -200,18 +208,28 @@ export function Builder({
               ))}
               {questions.length === 0 && <li className="px-3 py-3 text-sm text-muted">Ingen spørgsmål endnu.</li>}
             </ul>
-            <div className="flex gap-2 p-2">
-              <Select aria-label="Ny spørgsmålstype" id="new-q-type" defaultValue="nps">
-                {QUESTION_TYPES.map((t) => <option key={t} value={t}>{dkLabel(QUESTION_TYPE, t)}</option>)}
-              </Select>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => {
-                  const sel = document.getElementById("new-q-type") as HTMLSelectElement;
-                  addQuestion(sel.value as Question["type"]);
-                }}
+            <div className="space-y-2 p-2">
+              <Select
+                aria-label="Ny spørgsmålstype"
+                value={newType}
+                onChange={(e) => setNewType(e.target.value as Question["type"])}
               >
+                {QUESTION_GROUPS.map((group) => (
+                  <optgroup key={group.group} label={group.group}>
+                    {group.items.map((type) => (
+                      <option key={type.type} value={type.type}>{type.name}</option>
+                    ))}
+                  </optgroup>
+                ))}
+              </Select>
+              <div className="rounded-lg bg-background p-2 text-xs text-muted">
+                <p className="font-semibold text-foreground">{QUESTION_TYPE_METADATA[newType].name}</p>
+                <p>{QUESTION_TYPE_METADATA[newType].description}</p>
+                <p><span className="font-medium text-foreground">Eksempel:</span> {QUESTION_TYPE_METADATA[newType].example}</p>
+                <p><span className="font-medium text-foreground">Respondent:</span> {QUESTION_TYPE_METADATA[newType].respondentAction}</p>
+                <p><span className="font-medium text-foreground">Resultat:</span> {QUESTION_TYPE_METADATA[newType].resultMeasure}</p>
+              </div>
+              <Button size="sm" variant="secondary" onClick={() => addQuestion(newType)}>
                 + Tilføj
               </Button>
             </div>
@@ -221,12 +239,24 @@ export function Builder({
             {current ? (
               <QuestionEditor
                 key={current.code}
+                studyId={studyId}
                 question={current}
                 allQuestions={questions}
                 onChange={(patch) => updateQuestion(current.code, patch)}
               />
             ) : (
               <MessagesEditor def={def} mutate={mutate} />
+            )}
+            {current && (
+              <div className="mt-5 border-t border-line pt-4">
+                <h2 className="mb-3 text-sm font-semibold">Kommentarer til {current.code}</h2>
+                <CommentsPanel
+                  studyId={studyId}
+                  comments={initialComments}
+                  questionCode={current.code}
+                  canResolve={canResolveComments}
+                />
+              </div>
             )}
             {current && (
               <button className="mt-4 text-xs text-accent underline cursor-pointer" onClick={() => setSelected(null)}>
@@ -253,24 +283,24 @@ function LocalizedInput({
   textarea?: boolean;
 }) {
   const C = textarea ? Textarea : Input;
-  // felterne ligger inde i deres label-elementer (implicit tilknytning)
   return (
-    <div className="grid gap-2 sm:grid-cols-2">
-      <label className="block">
-        <span className="mb-1 block text-xs font-medium text-muted">{label} (dansk)</span>
-        <C value={value.da ?? ""} onChange={(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange({ ...value, da: e.target.value })} rows={2} />
-      </label>
-      <label className="block">
-        <span className="mb-1 block text-xs font-medium text-muted">{label} (engelsk variant)</span>
-        <C value={value.en ?? ""} onChange={(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange({ ...value, en: e.target.value })} rows={2} />
-      </label>
-    </div>
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium text-muted">{label}</span>
+      <C
+        value={value.da ?? ""}
+        onChange={(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+          onChange({ ...value, da: e.target.value })
+        }
+        rows={2}
+      />
+    </label>
   );
 }
 
 function QuestionEditor({
-  question, allQuestions, onChange,
+  studyId, question, allQuestions, onChange,
 }: {
+  studyId: string;
   question: Question;
   allQuestions: Question[];
   onChange: (patch: Partial<Question>) => void;
@@ -281,7 +311,7 @@ function QuestionEditor({
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
-        <Badge tone="accent">{dkLabel(QUESTION_TYPE, question.type)}</Badge>
+        <Badge tone="accent">{QUESTION_TYPE_METADATA[question.type].name}</Badge>
         <code className="text-xs text-muted">{question.code}</code>
         <label className="ml-auto flex items-center gap-1.5 text-sm">
           <input type="checkbox" checked={question.required}
@@ -306,13 +336,6 @@ function QuestionEditor({
                     options[i].label.da = e.target.value;
                     onChange({ options });
                   }} />
-                <Input aria-label={`Mulighed ${i + 1} (engelsk)`} className="w-44" placeholder="engelsk"
-                  value={opt.label.en ?? ""}
-                  onChange={(e) => {
-                    const options = structuredClone(question.options ?? []);
-                    options[i].label.en = e.target.value;
-                    onChange({ options });
-                  }} />
                 {question.type === "likert" && (
                   <Input aria-label={`Mulighed ${i + 1} værdi`} type="number" className="w-20"
                     value={opt.value === undefined ? "" : String(opt.value)}
@@ -331,7 +354,7 @@ function QuestionEditor({
           </ul>
           <Button size="sm" variant="secondary" className="mt-2"
             onClick={() => onChange({
-              options: [...(question.options ?? []), { id: nextId("opt"), label: { da: "", en: "" } }],
+              options: [...(question.options ?? []), { id: nextId("opt"), label: { da: "" } }],
             })}>
             + Mulighed
           </Button>
@@ -370,36 +393,70 @@ function QuestionEditor({
                     rows[i].label.da = e.target.value;
                     onChange({ rows });
                   }} />
-                <Input aria-label={`Række ${i + 1} (engelsk)`} className="w-44" placeholder="engelsk" value={row.label.en ?? ""}
-                  onChange={(e) => {
-                    const rows = structuredClone(question.rows ?? []);
-                    rows[i].label.en = e.target.value;
-                    onChange({ rows });
-                  }} />
                 <button aria-label={`Fjern række ${i + 1}`} className="px-1 text-muted hover:text-danger cursor-pointer"
                   onClick={() => onChange({ rows: (question.rows ?? []).filter((_, j) => j !== i) })}>×</button>
               </li>
             ))}
           </ul>
           <Button size="sm" variant="secondary" className="mt-2"
-            onClick={() => onChange({ rows: [...(question.rows ?? []), { id: nextId("row"), label: { da: "", en: "" } }] })}>
+            onClick={() => onChange({ rows: [...(question.rows ?? []), { id: nextId("row"), label: { da: "" } }] })}>
             + Række
           </Button>
+        </div>
+      )}
+
+      {question.type === "preference_test" && (
+        <div className="space-y-3">
+          <p className="text-sm text-muted">Upload 2–8 billeder. Respondenten vælger præcis ét.</p>
+          {(question.stimuli ?? []).map((stimulus, index) => (
+            <StimulusEditor
+              key={stimulus.id}
+              studyId={studyId}
+              kind="preference"
+              label={`Billede ${index + 1}`}
+              value={stimulus}
+              onChange={(asset) => {
+                const stimuli = [...(question.stimuli ?? [])];
+                stimuli[index] = asset;
+                onChange({ stimuli });
+              }}
+              onRemove={() => onChange({ stimuli: (question.stimuli ?? []).filter((_, itemIndex) => itemIndex !== index) })}
+            />
+          ))}
+          {(question.stimuli ?? []).length < 8 && (
+            <StimulusEditor
+              studyId={studyId}
+              kind="preference"
+              label={`Tilføj billede ${(question.stimuli ?? []).length + 1}`}
+              value={null}
+              onChange={(asset) => onChange({ stimuli: [...(question.stimuli ?? []), asset] })}
+            />
+          )}
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={question.randomizeStimuli ?? false}
+              onChange={(event) => onChange({ randomizeStimuli: event.target.checked })}
+            />
+            Bland billedernes rækkefølge for hver respondent
+          </label>
         </div>
       )}
 
       {question.type === "first_click" && (
         <div className="space-y-3">
           <LocalizedInput label="Opgaveinstruktion" value={question.taskText ?? {}} onChange={(taskText) => onChange({ taskText })} />
-          <div>
-            <Label htmlFor="fc-img">Billed-URL til stimulus (eller data-URI)</Label>
-            <Textarea id="fc-img" rows={2} value={question.imageUrl ?? ""}
-              onChange={(e) => onChange({ imageUrl: e.target.value })} />
-            {question.imageUrl && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={question.imageUrl} alt="Forhåndsvisning af stimulus" className="mt-2 max-h-48 rounded-lg border border-line" />
-            )}
-          </div>
+          <StimulusEditor
+            studyId={studyId}
+            kind="first_click"
+            label="Billede til første klik"
+            value={question.stimulus ?? null}
+            onChange={(stimulus) => onChange({ stimulus, imageUrl: undefined })}
+            onRemove={() => onChange({ stimulus: undefined })}
+          />
+          {question.imageUrl && !question.stimulus && (
+            <p className="text-xs text-muted">Ældre publicerede versioner kan fortsat vise deres eksisterende billed-URL.</p>
+          )}
         </div>
       )}
 

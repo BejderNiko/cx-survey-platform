@@ -31,7 +31,7 @@ export default async function InvitationSurveyPage({ params }: { params: Promise
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
-      <div className="w-full max-w-xl">
+      <div className="w-full max-w-6xl">
         {children}
         <p className="mt-6 text-center text-xs text-muted">OK · CX &amp; Market Insights</p>
       </div>

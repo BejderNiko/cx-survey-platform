@@ -1,5 +1,6 @@
 export * from "./permissions";
 export * from "./instrument";
+export * from "./question-metadata";
 export * from "./logic";
 export * from "./metrics";
 export * from "./sampling";

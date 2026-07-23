@@ -170,6 +170,28 @@ export function buildResponseDataset(
         }
         break;
       }
+      case "preference_test": {
+        const selectedName = `${q.code}__selected`;
+        const assetName = `${q.code}__selected_asset`;
+        const orderName = `${q.code}__display_order`;
+        const valueLabels = Object.fromEntries((q.stimuli ?? []).map((stimulus) => [stimulus.id, stimulus.altText]));
+        variables.push(
+          { name: selectedName, label: `${label} — valgt stimulus`, varType: "string", measure: "nominal", valueLabels, missingValues: [], role: "input", position: pos++ },
+          { name: assetName, label: `${label} — valgt billed-ID`, varType: "string", measure: "nominal", valueLabels: {}, missingValues: [], role: "input", position: pos++ },
+          { name: orderName, label: `${label} — visningsrækkefølge`, varType: "string", measure: "nominal", valueLabels: {}, missingValues: [], role: "input", position: pos++ },
+        );
+        columnBuilders.push(
+          { name: selectedName, extract: (r) => objectString(r.answers[q.code], "selectedId") },
+          { name: assetName, extract: (r) => objectString(r.answers[q.code], "selectedAssetId") },
+          { name: orderName, extract: (r) => {
+            const answer = r.answers[q.code];
+            if (!answer || typeof answer !== "object") return null;
+            const order = (answer as Record<string, unknown>).displayOrder;
+            return Array.isArray(order) ? JSON.stringify(order.map(String)) : null;
+          } },
+        );
+        break;
+      }
       case "first_click":
         // Interaction coordinates stay in interaction_events; not a dataset column.
         break;
@@ -228,6 +250,11 @@ function toNumber(v: unknown): number | null {
   if (v === undefined || v === null || v === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+function objectString(value: unknown, key: string): string | null {
+  if (!value || typeof value !== "object") return null;
+  return toStringOrNull((value as Record<string, unknown>)[key]);
 }
 
 function toStringOrNull(v: unknown): string | null {

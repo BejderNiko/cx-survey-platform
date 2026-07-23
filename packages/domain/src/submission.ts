@@ -204,6 +204,22 @@ function validateAnswerValue(question: Question, value: unknown): string | null 
       return isPlainObject(value) && nonNegativeNumber(value.x) && nonNegativeNumber(value.y)
         ? null
         : "must contain non-negative x/y coordinates.";
+    case "preference_test": {
+      if (!isPlainObject(value)) return "must identify one selected stimulus and its display order.";
+      const stimulusIds = (question.stimuli ?? []).map((stimulus) => stimulus.id);
+      const allowed = new Set(stimulusIds);
+      if (typeof value.selectedId !== "string" || !allowed.has(value.selectedId)) {
+        return "must select one available stimulus.";
+      }
+      const selected = question.stimuli?.find((stimulus) => stimulus.id === value.selectedId);
+      if (value.selectedAssetId !== selected?.assetId) return "selected asset does not match the stimulus.";
+      if (!Array.isArray(value.displayOrder)) return "must include the stimulus display order.";
+      const order = value.displayOrder.map(String);
+      if (order.length !== stimulusIds.length || new Set(order).size !== stimulusIds.length) {
+        return "display order must contain every stimulus exactly once.";
+      }
+      return order.every((id) => allowed.has(id)) ? null : "display order contains an unknown stimulus.";
+    }
   }
 }
 

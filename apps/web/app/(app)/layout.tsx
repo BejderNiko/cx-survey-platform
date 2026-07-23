@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { can, type Action } from "@ok/domain";
-import { IconBulb, IconChart, IconCog, IconHome, IconPanel, IconStudy } from "@/components/icons";
+import { IconChart, IconCog, IconHome, IconPanel, IconStudy } from "@/components/icons";
 import { destroySession, requireSession } from "@/lib/auth";
 import { t, type UiKey } from "@/lib/i18n";
 import { ROLE_LABEL, label } from "@/lib/labels";
@@ -18,7 +18,6 @@ const NAV: { href: string; key: UiKey; icon: ReactNode; requires?: Action }[] = 
   { href: "/studies", key: "nav_studies", icon: <IconStudy />, requires: "studies.view" },
   { href: "/panel", key: "nav_panel", icon: <IconPanel />, requires: "panel.view" },
   { href: "/analytics", key: "nav_analytics", icon: <IconChart />, requires: "analytics.view" },
-  { href: "/insights", key: "nav_insights", icon: <IconBulb />, requires: "insights.view" },
   { href: "/admin", key: "nav_admin", icon: <IconCog />, requires: "members.invite" },
 ];
 

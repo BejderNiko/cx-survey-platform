@@ -68,7 +68,6 @@ const desktopShots = [
   ["/home", "home-desktop"],
   ["/panel", "panel-desktop"],
   ["/studies", "studies-desktop"],
-  ["/insights", "insights-desktop"],
   ["/admin", "admin-desktop"],
 ];
 let overflowOk = true;

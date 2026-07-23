@@ -47,7 +47,7 @@ Allowed states only:
 - `scaffolded/partial`
 - `planned`
 
-Minimum capabilities: tenancy/RLS, role authorization, local auth, Entra/Supabase Auth, panel/consent, import, studies/versioning, respondent public link, invitation flow, distribution governance, follow-up, datasets/lineage, analytics procedures, SAV, exports, audit/insights, GDPR anonymization, hosted Supabase, Vercel Preview, analytics deployment, queues/workers, observability, backup/restore.
+Minimum capabilities: tenancy/RLS, role authorization, local auth, Entra/Supabase Auth, panel/consent, import, studies/versioning, respondent public link, invitation flow, distribution governance, follow-up, datasets/lineage, analytics procedures, SAV, exports, audit, GDPR anonymization, hosted Supabase, Vercel Preview, analytics deployment, queues/workers, observability, backup/restore.
 
 ## 4. Current architecture diagram
 

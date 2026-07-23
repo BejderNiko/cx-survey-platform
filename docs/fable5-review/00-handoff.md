@@ -71,8 +71,9 @@ Static migration audit in referenced session counted:
 ```text
 tenancy/panel tables       16
 study/response tables      15
-analytics/insight tables    9
-total                      40
+analytics tables              7
+retired repository tables     2
+total                         40
 ```
 
 No `DROP`, `TRUNCATE`, or `DELETE FROM` was found in four migration files. This does not establish hosted migration readiness.

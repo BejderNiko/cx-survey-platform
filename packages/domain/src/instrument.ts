@@ -3,7 +3,8 @@ import { z } from "zod";
 /**
  * Instrument definition: the versioned survey document stored in
  * studies.draft_definition and snapshotted immutably into study_versions.
- * Danish and English variants live side by side in LocalizedText.
+ * Mutable drafts are Danish-only. LocalizedText still reads English in
+ * historical immutable published versions.
  */
 
 export const LOCALES = ["da", "en"] as const;
@@ -38,6 +39,7 @@ export const QUESTION_TYPES = [
   "ranking",
   "consent",
   "first_click",
+  "preference_test",
 ] as const;
 export type QuestionType = (typeof QUESTION_TYPES)[number];
 
@@ -68,6 +70,13 @@ export const option = z.object({
 });
 export type Option = z.infer<typeof option>;
 
+export const stimulusAsset = z.object({
+  id: z.string().min(1).max(100),
+  assetId: z.string().uuid(),
+  altText: z.string().trim().min(1).max(500),
+});
+export type StimulusAsset = z.infer<typeof stimulusAsset>;
+
 export const question = z.object({
   code: z.string().regex(/^[a-z][a-z0-9_]*$/, "codes are snake_case identifiers"),
   type: z.enum(QUESTION_TYPES),
@@ -87,6 +96,10 @@ export const question = z.object({
   rows: z.array(option).optional(),              // matrix rows (columns = options)
   imageUrl: z.string().optional(),               // first_click stimulus (data URI or path)
   taskText: localizedText.optional(),            // first_click task instruction
+  stimulus: stimulusAsset.optional(),             // secure first-click asset (legacy imageUrl stays readable)
+  stimuli: z.array(stimulusAsset).min(2).max(8).optional(), // preference test assets
+  randomizeStimuli: z.boolean().optional(),
+  contextOverride: stimulusAsset.nullable().optional(), // reserved question-level override; null hides study context
   visibleIf: z.array(condition).optional(),      // display conditions (AND)
   branches: z.array(branchRule).optional(),      // evaluated after answering
   isScreener: z.boolean().optional(),            // disqualifying screener question
@@ -97,6 +110,7 @@ export const block = z.object({
   id: z.string(),
   title: localizedText.optional(),
   questions: z.array(question),
+  contextOverride: stimulusAsset.nullable().optional(), // reserved block-level override; undefined inherits
 });
 export type Block = z.infer<typeof block>;
 
@@ -113,6 +127,7 @@ export const instrumentDefinition = z.object({
   defaultLanguage: z.enum(LOCALES),
   blocks: z.array(block),
   messages: instrumentMessages.default({}),
+  contextStimulus: stimulusAsset.optional(),
 });
 export type InstrumentDefinition = z.infer<typeof instrumentDefinition>;
 /** Author-facing input shape (before zod defaults are applied). */
@@ -123,6 +138,34 @@ export function allQuestions(def: InstrumentDefinition): Question[] {
 }
 
 /** Validation used by the builder and by publish. Returns human-readable problems. */
+
+/** Convert a mutable draft to Danish authoring while leaving published snapshots untouched. */
+export function toDanishDraft(definition: InstrumentDefinition): InstrumentDefinition {
+  const draft = structuredClone(definition);
+  draft.languages = ["da"];
+  draft.defaultLanguage = "da";
+  const stripEnglish = (text: LocalizedText | undefined) => {
+    if (text) delete text.en;
+  };
+  for (const currentBlock of draft.blocks) {
+    stripEnglish(currentBlock.title);
+    for (const currentQuestion of currentBlock.questions) {
+      stripEnglish(currentQuestion.label);
+      stripEnglish(currentQuestion.helpText);
+      stripEnglish(currentQuestion.taskText);
+      stripEnglish(currentQuestion.scale?.minLabel);
+      stripEnglish(currentQuestion.scale?.maxLabel);
+      for (const item of currentQuestion.options ?? []) stripEnglish(item.label);
+      for (const item of currentQuestion.rows ?? []) stripEnglish(item.label);
+    }
+  }
+  stripEnglish(draft.messages.intro);
+  stripEnglish(draft.messages.thankYou);
+  stripEnglish(draft.messages.disqualified);
+  stripEnglish(draft.messages.closed);
+  stripEnglish(draft.messages.quotaFull);
+  return instrumentDefinition.parse(draft);
+}
 export function validateInstrument(def: InstrumentDefinition): string[] {
   const problems: string[] = [];
   const qs = allQuestions(def);
@@ -163,8 +206,11 @@ export function validateInstrument(def: InstrumentDefinition): string[] {
         problems.push(`Rating question '${q.code}' needs an integer scale spanning 1 to 20 steps.`);
       }
     }
-    if (q.type === "first_click" && !q.imageUrl) {
-      problems.push(`First-click question '${q.code}' needs a stimulus image.`);
+    if (q.type === "first_click" && !q.imageUrl && !q.stimulus) {
+      problems.push(`Første-klik-spørgsmålet '${q.code}' mangler et stimulusbillede.`);
+    }
+    if (q.type === "preference_test" && (!q.stimuli || q.stimuli.length < 2 || q.stimuli.length > 8)) {
+      problems.push(`Præferencetesten '${q.code}' skal have mellem 2 og 8 billeder.`);
     }
   }
   const order = qs.map((q) => q.code);

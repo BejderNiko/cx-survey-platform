@@ -116,9 +116,9 @@ the rest of the review.
 
 See `docs/implementation-plan.md` §"Honest gap list": Supabase/Entra cutover,
 reminders/scheduling, CRM connectors (boundary only), card sorting/tree
-testing/preference tests, imputation/mixed models/conjoint, ILIKE-based
-insight search, in-memory rate limiting, no CSP, per-instance sessions,
-Parquet for large datasets, CI workflow committed but never executed.
+testing, imputation/mixed models/conjoint, in-memory rate limiting, no CSP,
+per-instance sessions, Parquet for large datasets, CI workflow committed but
+never executed.
 Report them only if you find them **misrepresented** (claimed working when not).
 
 ## 5. Deliverable format for findings

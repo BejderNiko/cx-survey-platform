@@ -8,6 +8,7 @@ import {
   type InstrumentDefinition,
   type Locale,
   type Question,
+  type StimulusAsset,
 } from "@ok/domain";
 import { Button, Input, Textarea, cn } from "@/components/ui";
 
@@ -35,11 +36,13 @@ export function SurveyRenderer({
   mode,
   onComplete,
   studyTitle,
+  assetToken,
 }: {
   definition: InstrumentDefinition;
   locale?: Locale;
   mode: "preview" | "live";
   studyTitle?: string;
+  assetToken?: string;
   onComplete?: (result: {
     status: "completed" | "disqualified";
     answers: AnswerPayload[];
@@ -94,6 +97,10 @@ export function SurveyRenderer({
   );
 
   const answerValue = current ? answers[current.code] : undefined;
+  const currentContext = current
+    ? current.contextOverride === undefined ? definition.contextStimulus : current.contextOverride
+    : undefined;
+
 
   function isAnswered(q: Question, v: unknown): boolean {
     if (v === undefined || v === null || v === "") return false;
@@ -151,7 +158,7 @@ export function SurveyRenderer({
   const msg = (key: "intro" | "thankYou" | "disqualified") => lt(definition.messages?.[key], locale);
 
   return (
-    <div className="mx-auto w-full max-w-xl">
+    <div className={cn("mx-auto w-full", currentContext ? "max-w-6xl" : "max-w-xl")}>
       <div className="mb-3 flex items-center justify-between gap-2">
         <span className="text-xs text-muted">{studyTitle ?? ""}</span>
         {definition.languages.length > 1 && (
@@ -186,27 +193,49 @@ export function SurveyRenderer({
       )}
 
       {phase === "question" && current && (
-        <div className="rounded-lg border border-line bg-surface p-5 sm:p-6">
-          <fieldset>
-            <legend className="text-base font-medium">
-              {lt(current.label, locale)}
-              {current.required && <span aria-hidden className="text-danger"> *</span>}
-            </legend>
-            {current.helpText && <p className="mt-1 text-sm text-muted">{lt(current.helpText, locale)}</p>}
-            <div className="mt-4">
-              <QuestionInput question={current} locale={locale} value={answerValue} onChange={setAnswer} interactions={interactionsRef} />
-            </div>
-          </fieldset>
-          {validationMsg && (
-            <p role="alert" className="mt-3 text-sm text-danger">{validationMsg}</p>
+        <div className={cn(
+          "grid min-w-0 gap-4",
+          currentContext && "lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-start",
+        )}>
+          {currentContext && (
+            <figure className="min-w-0 overflow-hidden rounded-lg border border-line bg-surface p-3 lg:sticky lg:top-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={stimulusUrl(currentContext, assetToken)}
+                alt={currentContext.altText}
+                className="max-h-[70vh] w-full max-w-full object-contain"
+              />
+            </figure>
           )}
-          <div className="mt-5 flex items-center justify-between">
-            <Button variant="ghost" onClick={back}>
-              {locale === "da" ? "Tilbage" : "Back"}
-            </Button>
-            <Button onClick={next} disabled={submitting}>
-              {locale === "da" ? "Næste" : "Next"}
-            </Button>
+          <div className="min-w-0 rounded-lg border border-line bg-surface p-5 sm:p-6">
+            <fieldset>
+              <legend className="text-base font-medium">
+                {lt(current.label, locale)}
+                {current.required && <span aria-hidden className="text-danger"> *</span>}
+              </legend>
+              {current.helpText && <p className="mt-1 text-sm text-muted">{lt(current.helpText, locale)}</p>}
+              <div className="mt-4">
+                <QuestionInput
+                  question={current}
+                  locale={locale}
+                  value={answerValue}
+                  onChange={setAnswer}
+                  interactions={interactionsRef}
+                  assetToken={assetToken}
+                />
+              </div>
+            </fieldset>
+            {validationMsg && (
+              <p role="alert" className="mt-3 text-sm text-danger">{validationMsg}</p>
+            )}
+            <div className="mt-5 flex items-center justify-between">
+              <Button variant="ghost" onClick={back}>
+                {locale === "da" ? "Tilbage" : "Back"}
+              </Button>
+              <Button onClick={next} disabled={submitting}>
+                {locale === "da" ? "Næste" : "Next"}
+              </Button>
+            </div>
           </div>
         </div>
       )}
@@ -304,13 +333,14 @@ function OptionList({
 }
 
 function QuestionInput({
-  question, locale, value, onChange, interactions: interactionsRef,
+  question, locale, value, onChange, interactions: interactionsRef, assetToken,
 }: {
   question: Question;
   locale: Locale;
   value: unknown;
   onChange: (v: unknown) => void;
   interactions: React.RefObject<InteractionPayload[]>;
+  assetToken?: string;
 }) {
   switch (question.type) {
     case "nps":
@@ -475,15 +505,28 @@ function QuestionInput({
         </div>
       );
     }
+    case "preference_test":
+      return (
+        <PreferenceInput
+          key={question.code}
+          question={question}
+          value={value}
+          onChange={onChange}
+          assetToken={assetToken}
+        />
+
+      );
     case "first_click": {
       const v = value as { x: number; y: number } | undefined;
+      const imageUrl = question.stimulus ? stimulusUrl(question.stimulus, assetToken) : question.imageUrl ?? "";
       return (
         <div>
           {question.taskText && (
             <p className="mb-2 rounded-md bg-accent-soft px-3 py-2 text-sm">{lt(question.taskText, locale)}</p>
           )}
           <FirstClickImage
-            imageUrl={question.imageUrl ?? ""}
+            imageUrl={imageUrl}
+            altText={question.stimulus?.altText ?? "Teststimulus"}
             value={v}
             onClickPoint={(pt, meta) => {
               onChange(pt);
@@ -516,9 +559,10 @@ function QuestionInput({
 }
 
 function FirstClickImage({
-  imageUrl, value, onClickPoint,
+  imageUrl, altText, value, onClickPoint,
 }: {
   imageUrl: string;
+  altText: string;
   value: { x: number; y: number } | undefined;
   onClickPoint: (pt: { x: number; y: number }, meta: Record<string, unknown>) => void;
 }) {
@@ -535,7 +579,7 @@ function FirstClickImage({
       <img
         ref={imgRef}
         src={imageUrl}
-        alt="Test stimulus"
+        alt={altText}
         className="max-w-full cursor-crosshair rounded-md border border-line"
         onClick={(e) => {
           const img = imgRef.current;
@@ -563,6 +607,82 @@ function FirstClickImage({
           style={{ left: display.x, top: display.y }}
         />
       )}
+    </div>
+  );
+}
+
+function stimulusUrl(asset: StimulusAsset, token?: string): string {
+  const query = token ? `?token=${encodeURIComponent(token)}` : "";
+  return `/api/stimuli/${asset.assetId}${query}`;
+}
+
+function PreferenceInput({
+  question, value, onChange, assetToken,
+}: {
+  question: Question;
+  value: unknown;
+  onChange: (value: unknown) => void;
+  assetToken?: string;
+}) {
+  const [ordered] = useState(() => {
+    const stimuli = question.stimuli ?? [];
+    const submittedOrder = value && typeof value === "object"
+      ? (value as Record<string, unknown>).displayOrder
+      : undefined;
+    if (Array.isArray(submittedOrder)) {
+      const byId = new Map(stimuli.map((stimulus) => [stimulus.id, stimulus]));
+      const restored = submittedOrder.map((id) => byId.get(String(id)));
+      if (restored.length === stimuli.length && restored.every(Boolean)
+          && new Set(submittedOrder.map(String)).size === stimuli.length) {
+        return restored as typeof stimuli;
+      }
+    }
+    const items = [...stimuli];
+    if (!question.randomizeStimuli) return items;
+    for (let i = items.length - 1; i > 0; i--) {
+      const random = globalThis.crypto.getRandomValues(new Uint32Array(1))[0];
+      const j = random % (i + 1);
+      [items[i], items[j]] = [items[j], items[i]];
+    }
+    return items;
+  });
+  const selectedId = value && typeof value === "object"
+    ? String((value as Record<string, unknown>).selectedId ?? "")
+    : "";
+  const displayOrder = ordered.map((stimulus) => stimulus.id);
+
+  return (
+    <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Vælg foretrukket billede">
+      {ordered.map((stimulus) => {
+        const selected = selectedId === stimulus.id;
+        return (
+          <button
+            key={stimulus.id}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            onClick={() => onChange({
+              selectedId: stimulus.id,
+              selectedAssetId: stimulus.assetId,
+              displayOrder,
+            })}
+            className={cn(
+              "relative min-w-0 overflow-hidden rounded-lg border-2 bg-surface p-2 text-left transition-colors cursor-pointer",
+              selected ? "border-accent ring-2 ring-accent/25" : "border-line hover:border-accent/50",
+            )}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={stimulusUrl(stimulus, assetToken)}
+              alt={stimulus.altText}
+              className="h-48 w-full max-w-full object-contain"
+            />
+            <span className={cn("mt-2 block text-sm", selected ? "font-semibold text-accent" : "text-muted")}>
+              {selected ? "Valgt" : "Vælg dette billede"}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }

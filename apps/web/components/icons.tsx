@@ -61,15 +61,6 @@ export function IconChart(props: ComponentProps<"svg">) {
   );
 }
 
-export function IconBulb(props: ComponentProps<"svg">) {
-  return (
-    <Svg {...props}>
-      <path d="M9.5 18h5" />
-      <path d="M10.5 21h3" />
-      <path d="M12 3a6 6 0 0 0-3.4 10.9c.7.5 1.1 1.2 1.2 2.1h4.4c.1-.9.5-1.6 1.2-2.1A6 6 0 0 0 12 3Z" />
-    </Svg>
-  );
-}
 
 export function IconCog(props: ComponentProps<"svg">) {
   return (

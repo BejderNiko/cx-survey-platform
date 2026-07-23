@@ -13,7 +13,7 @@ Updated: 2026-07-21 (Phase A remediation reviewed locally)
 | 5 | Survey builder/versioning/preview/duplicate/publish/respond | ✅ done |
 | 6 | Distribution simulation, delivery tracking, inbox, follow-up rules | ✅ done |
 | 7 | Quick + advanced analytics, core statistics, charts, exports | ✅ done |
-| 8 | Collaboration, insights repository, audit, privacy workflows | ⚠️ partial — retained-dataset anonymization remains blocked on ADR-007 |
+| 8 | Threaded study/question collaboration, audit, privacy workflows | ⚠️ partial — retained-dataset anonymization remains blocked on ADR-007 |
 | 9 | Browser/accessibility checks, numerical validation, docs | ✅ done |
 
 ## Acceptance criteria evidence
@@ -52,8 +52,8 @@ Updated: 2026-07-21 (Phase A remediation reviewed locally)
     for all four; formula-injection sanitization tested.
 13. **Reproducible analysis** — saved recipes rerun via UI and record dataset
     version, params, seed, and library versions on every run.
-14. **Collaboration** — comments on studies/insights; viewer can read shared
-    studies/results/analyses but has no modify controls (spec-tested).
+14. **Collaboration** — threaded comments on studies and questions; viewer can read shared
+    studies/results/analyses but has no study modify controls (spec-tested).
 15. **Accessibility** — axe-core (WCAG 2.0/2.1 A+AA) on core pages: 0
     serious/critical violations; keyboard focus visible and functional in the
     respondent runtime.
@@ -88,9 +88,7 @@ Updated: 2026-07-21 (Phase A remediation reviewed locally)
 5. **Panel** — enrichment campaigns, bias-control filters (opened-message),
    panel health trend charts, retention/anonymization scheduling (manual
    anonymization works today).
-6. **Insights** — full-text search is ILIKE-based today; Postgres FTS or
-   pgvector is the milestone; report exports (PDF) not built.
-7. **Ops** — rate limiting is per-instance in-memory; needs a shared store
+6. **Ops** — rate limiting is per-instance in-memory; needs a shared store
    behind a real deployment. No CSP headers yet. Session revocation list.
 8. **Connectors** — Outlook/Teams/Dynamics/Salesforce/Zendesk are architecture
    boundaries (trigger_events + notifications), no live integrations. None are
