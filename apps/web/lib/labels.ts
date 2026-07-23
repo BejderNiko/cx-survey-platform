@@ -160,3 +160,18 @@ export const MEASURE: Record<string, string> = {
   ordinal: "Ordinal",
   scale: "Skala",
 };
+
+export const CUSTOM_FIELD_TYPE: Record<string, string> = {
+  text: "Tekst",
+  number: "Tal",
+  boolean: "Ja/nej",
+  select: "Liste (vælg én)",
+  multi_select: "Liste (vælg flere)",
+  date: "Dato",
+};
+
+export const LOGO_POSITION: Record<string, string> = {
+  left: "Venstre",
+  center: "Centreret",
+  right: "Højre",
+};

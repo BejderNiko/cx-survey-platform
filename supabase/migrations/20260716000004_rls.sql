@@ -13,8 +13,9 @@
 create or replace function public.current_org_ids() returns setof uuid
 language sql stable security definer set search_path = public
 as $$
-  select org_id from memberships
-  where user_id = auth.uid() and deactivated_at is null
+  select m.org_id from memberships m
+  where m.user_id = auth.uid()
+    and m.deactivated_at is null
 $$;
 
 -- users: self plus co-members of shared orgs.
