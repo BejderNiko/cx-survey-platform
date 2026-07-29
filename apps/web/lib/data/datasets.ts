@@ -4,12 +4,20 @@ import type { DatasetPayload, VariablePayload } from "../analytics-client";
 import { buildResponseDataset, type ResponseRecord } from "../dataset-build";
 
 /** Load a dataset version (rows + variable metadata) as an analytics payload. */
-export async function loadDatasetPayload(tx: Tx, datasetVersionId: string): Promise<DatasetPayload | null> {
-  const [version] = await tx`select id, rows from dataset_versions where id = ${datasetVersionId}`;
+export async function loadDatasetPayload(
+  tx: Tx,
+  orgId: string,
+  datasetVersionId: string,
+): Promise<DatasetPayload | null> {
+  const [version] = await tx`
+    select id, rows from dataset_versions
+    where id = ${datasetVersionId} and org_id = ${orgId}`;
   if (!version) return null;
   const vars = await tx`
     select name, label, var_type, measure, value_labels, missing_values
-    from variables where dataset_version_id = ${datasetVersionId} order by position`;
+    from variables
+    where dataset_version_id = ${datasetVersionId} and org_id = ${orgId}
+    order by position`;
   return {
     variables: vars.map((v) => ({
       name: v.name as string,
@@ -34,8 +42,15 @@ export async function insertDatasetVersion(
     createdBy: string;
   },
 ): Promise<string> {
+  const [dataset] = await tx`
+    select id from datasets
+    where id = ${input.datasetId} and org_id = ${input.orgId}
+    for update`;
+  if (!dataset) throw new Error("Dataset not found in the selected organization.");
   const [next] = await tx`
-    select coalesce(max(version_number), 0) + 1 as v from dataset_versions where dataset_id = ${input.datasetId}`;
+    select coalesce(max(version_number), 0) + 1 as v
+    from dataset_versions
+    where dataset_id = ${input.datasetId} and org_id = ${input.orgId}`;
   const [version] = await tx`
     insert into dataset_versions (org_id, dataset_id, version_number, row_count, variable_count, lineage, rows, created_by)
     values (${input.orgId}, ${input.datasetId}, ${next.v}, ${input.rows.length}, ${input.variables.length},
@@ -55,24 +70,33 @@ export async function buildStudyDataset(
   tx: Tx,
   input: { orgId: string; studyId: string; userId: string },
 ): Promise<{ datasetId: string; versionId: string; rowCount: number }> {
-  const [study] = await tx`select id, title from studies where id = ${input.studyId}`;
+  const [study] = await tx`
+    select id, title from studies
+    where id = ${input.studyId} and org_id = ${input.orgId}`;
   if (!study) throw new Error("Study not found");
   const [version] = await tx`
     select id, version_number, definition from study_versions
-    where study_id = ${input.studyId} order by version_number desc limit 1`;
+    where study_id = ${input.studyId} and org_id = ${input.orgId}
+    order by version_number desc limit 1`;
   if (!version) throw new Error("The study has no published version yet.");
   const def = instrumentDefinition.parse(version.definition);
 
   const respRows = await tx`
     select r.id, r.respondent_key, r.completed_at, r.language, r.channel, r.panelist_id,
            p.gender, p.birth_year, p.customer_status
-    from responses r left join panelists p on p.id = r.panelist_id
-    where r.study_id = ${input.studyId} and r.study_version_id = ${version.id} and r.status = 'completed'
+    from responses r
+    left join panelists p on p.id = r.panelist_id and p.org_id = ${input.orgId}
+    where r.study_id = ${input.studyId} and r.study_version_id = ${version.id}
+      and r.org_id = ${input.orgId} and r.status = 'completed'
     order by r.started_at`;
   const answers = await tx`
     select response_id, question_code, value from response_answers
-    where response_id in (select id from responses where study_id = ${input.studyId}
-      and study_version_id = ${version.id} and status = 'completed')`;
+    where org_id = ${input.orgId}
+      and response_id in (
+        select id from responses
+        where study_id = ${input.studyId} and study_version_id = ${version.id}
+          and org_id = ${input.orgId} and status = 'completed'
+      )`;
   const byResponse = new Map<string, Record<string, unknown>>();
   for (const a of answers) {
     const m = byResponse.get(a.response_id) ?? {};

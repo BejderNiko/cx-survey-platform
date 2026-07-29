@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { can } from "@ok/domain";
-import { Badge, Card, PageHeader, Table, Td, Th } from "@/components/ui";
+import { Badge, Card, LinkButton, PageHeader, Table, Td, Th } from "@/components/ui";
 import { requireSession } from "@/lib/auth";
 import { analyticsHealth } from "@/lib/analytics-client";
+import { getAnalyticsOverview } from "@/lib/data/analytics";
 import { withUser } from "@/lib/db";
 import { fmtDateTime } from "@/lib/format";
 import { RUN_STATUS, label } from "@/lib/labels";
@@ -12,30 +13,11 @@ export default async function AnalyticsPage() {
   const session = await requireSession();
   const health = await analyticsHealth();
 
-  const data = await withUser(session.userId, session.orgId, async (tx) => {
-    const datasets = await tx`
-      select d.id, d.name, d.description, d.source_kind, d.created_at, u.full_name as owner,
-             s.title as study_title,
-             (select max(version_number) from dataset_versions v where v.dataset_id = d.id) as latest_version,
-             (select row_count from dataset_versions v where v.dataset_id = d.id order by version_number desc limit 1) as row_count,
-             (select variable_count from dataset_versions v where v.dataset_id = d.id order by version_number desc limit 1) as variable_count
-      from datasets d
-      join users u on u.id = d.owner_id
-      left join studies s on s.id = d.source_study_id
-      order by d.created_at desc`;
-    const studies = await tx`
-      select s.id, s.title from studies s
-      where exists (select 1 from study_versions v where v.study_id = s.id)
-      order by s.title`;
-    const runs = await tx`
-      select ar.id, ar.procedure, ar.status, ar.started_at, ar.error, u.full_name as author, d.name as dataset_name, d.id as dataset_id
-      from analysis_runs ar
-      join dataset_versions dv on dv.id = ar.dataset_version_id
-      join datasets d on d.id = dv.dataset_id
-      join users u on u.id = ar.created_by
-      order by ar.started_at desc limit 15`;
-    return { datasets, studies, runs };
-  });
+  const data = await withUser(
+    session.userId,
+    session.orgId,
+    (tx) => getAnalyticsOverview(tx, session.orgId),
+  );
 
   const canCreate = can(session.role, "datasets.create");
 
@@ -48,6 +30,7 @@ export default async function AnalyticsPage() {
             ? `Analysetjenesten er online · ${health.procedures.length} procedurer · pandas ${health.versions.pandas}, scipy ${health.versions.scipy}, statsmodels ${health.versions.statsmodels}`
             : "Analysetjenesten er offline — start den med: cd apps/analytics && uv run uvicorn ok_analytics.main:app --port 8000"
         }
+        actions={canCreate ? <LinkButton href="/analytics/import" variant="primary">Importér rådata</LinkButton> : undefined}
       />
 
       {canCreate && (
@@ -77,7 +60,7 @@ export default async function AnalyticsPage() {
                   {d.description && <p className="text-xs text-muted">{d.description}</p>}
                 </Td>
                 <Td>
-                  <Badge tone={d.source_kind === "derived" ? "amber" : "blue"}>{d.source_kind === "derived" ? "afledt" : "studie"}</Badge>
+                  <Badge tone={d.source_kind === "derived" ? "amber" : "blue"}>{d.source_kind === "derived" ? "afledt" : d.source_kind === "file_import" ? "ekstern rådata" : "studie"}</Badge>
                   {d.study_title && <span className="ml-1 text-xs text-muted">{d.study_title}</span>}
                 </Td>
                 <Td>{d.owner}</Td>

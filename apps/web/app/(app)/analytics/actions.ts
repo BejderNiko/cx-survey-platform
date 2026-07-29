@@ -51,12 +51,23 @@ export async function runAnalysis(input: RunAnalysisInput): Promise<{
 }> {
   // Step 1 — durable 'running' row, committed before any network call.
   const prepared = await withAuthorized("analytics.run", async (tx, session) => {
-    const payload = await loadDatasetPayload(tx, input.datasetVersionId);
+    const [selectedVersion] = await tx`
+      select dataset_id from dataset_versions
+      where id = ${input.datasetVersionId} and org_id = ${session.orgId}`;
+    if (!selectedVersion) throw new Error("Datasætversionen blev ikke fundet");
+    const payload = await loadDatasetPayload(tx, session.orgId, input.datasetVersionId);
     if (!payload) throw new Error("Datasætversionen blev ikke fundet");
 
     let recipeId = input.recipeId ?? null;
-    if (!recipeId && input.recipeName) {
-      const [version] = await tx`select dataset_id from dataset_versions where id = ${input.datasetVersionId}`;
+    if (recipeId) {
+      const [recipe] = await tx`
+        select id from analysis_recipes
+        where id = ${recipeId} and org_id = ${session.orgId}
+          and dataset_id = ${selectedVersion.dataset_id}`;
+      if (!recipe) throw new Error("Opskriften blev ikke fundet for datasættet");
+    } else if (input.recipeName) {
+      const [version] = await tx`select dataset_id from dataset_versions
+        where id = ${input.datasetVersionId} and org_id = ${session.orgId}`;
       const [recipe] = await tx`
         insert into analysis_recipes (org_id, dataset_id, name, procedure, params, created_by)
         values (${session.orgId}, ${version.dataset_id}, ${input.recipeName}, ${input.procedure},
@@ -119,8 +130,9 @@ export async function runAnalysis(input: RunAnalysisInput): Promise<{
 
 /** Rerun a saved recipe against a dataset version (defaults to the recipe's original params). */
 export async function rerunRecipe(recipeId: string, datasetVersionId: string) {
-  const recipe = await withAuthorized("analytics.run", async (tx) => {
-    const [r] = await tx`select procedure, params from analysis_recipes where id = ${recipeId}`;
+  const recipe = await withAuthorized("analytics.run", async (tx, session) => {
+    const [r] = await tx`select procedure, params from analysis_recipes
+      where id = ${recipeId} and org_id = ${session.orgId}`;
     return r ?? null;
   });
   if (!recipe) throw new Error("Opskriften blev ikke fundet");
@@ -144,12 +156,13 @@ export interface DeriveInput {
 /** Create a derived dataset (filter + column selection) without touching the source. */
 export async function deriveDataset(input: DeriveInput) {
   const result = await withAuthorized("datasets.create", async (tx, session) => {
-    const payload = await loadDatasetPayload(tx, input.datasetVersionId);
+    const payload = await loadDatasetPayload(tx, session.orgId, input.datasetVersionId);
     if (!payload) throw new Error("Datasætversionen blev ikke fundet");
     const [source] = await tx`
       select dv.dataset_id, dv.version_number, d.name as dataset_name
-      from dataset_versions dv join datasets d on d.id = dv.dataset_id
-      where dv.id = ${input.datasetVersionId}`;
+      from dataset_versions dv
+      join datasets d on d.id = dv.dataset_id and d.org_id = ${session.orgId}
+      where dv.id = ${input.datasetVersionId} and dv.org_id = ${session.orgId}`;
 
     let rows = payload.rows;
     let filterDesc: string | null = null;

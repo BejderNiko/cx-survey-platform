@@ -41,6 +41,26 @@ export function checkFile(name: string, size: number, mime: string): string | nu
   return null;
 }
 
+function assertUniqueHeaders(
+  columns: string[],
+  source: "CSV" | "XLSX",
+  renamedHeaders: Record<string, string> = {},
+): void {
+  const seen = new Map<string, string>();
+  const duplicates = new Set(Object.values(renamedHeaders));
+  for (const column of columns) {
+    const normalized = column.toLowerCase();
+    const existing = seen.get(normalized);
+    if (existing) duplicates.add(existing);
+    else seen.set(normalized, column);
+  }
+  if (duplicates.size > 0) {
+    throw new Error(
+      `${source} contains duplicate column headers: ${[...duplicates].join(", ")}.`,
+    );
+  }
+}
+
 export async function parseImportFile(
   buffer: Buffer,
   filename: string,
@@ -61,9 +81,17 @@ function parseCsv(buffer: Buffer): ParsedFile {
     skipEmptyLines: "greedy",
     transformHeader: (h) => h.trim(),
   });
-  if (result.errors.some((e) => e.type === "Delimiter")) {
-    throw new Error("Could not detect the CSV delimiter.");
+  const structuralError = result.errors.find(
+    (error) => error.type === "FieldMismatch" || error.type === "Quotes",
+  );
+  if (structuralError) {
+    const row = typeof structuralError.row === "number"
+      ? ` on source row ${structuralError.row + 2}`
+      : "";
+    throw new Error(`CSV structure error${row}: ${structuralError.code}.`);
   }
+  const columns = result.meta.fields ?? [];
+  assertUniqueHeaders(columns, "CSV", result.meta.renamedHeaders);
   if (result.data.length > IMPORT_LIMITS.maxRows) {
     throw new Error(`File contains ${result.data.length} rows; maximum is ${IMPORT_LIMITS.maxRows}.`);
   }
@@ -73,10 +101,40 @@ function parseCsv(buffer: Buffer): ParsedFile {
     return out;
   });
   return {
-    columns: result.meta.fields ?? [],
+    columns,
     rows,
     meta: { delimiter: result.meta.delimiter, rowCount: rows.length },
   };
+}
+
+function xlsxCellText(value: unknown, rowNumber: number, columnNumber: number): string {
+  if (value === null || value === undefined) return "";
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (["string", "number", "boolean"].includes(typeof value)) return String(value).trim();
+  if (typeof value !== "object") {
+    throw new Error(`Worksheet row ${rowNumber}, column ${columnNumber} has an unsupported value.`);
+  }
+
+  const cell = value as Record<string, unknown>;
+  if ("formula" in cell || "sharedFormula" in cell) {
+    if (!("result" in cell) || cell.result === null || cell.result === undefined) {
+      throw new Error(`Worksheet row ${rowNumber}, column ${columnNumber} contains a formula without a cached result.`);
+    }
+    return xlsxCellText(cell.result, rowNumber, columnNumber);
+  }
+  if (Array.isArray(cell.richText)) {
+    return cell.richText
+      .map((part) => typeof part === "object" && part !== null && "text" in part
+        ? String((part as { text: unknown }).text)
+        : "")
+      .join("")
+      .trim();
+  }
+  if (typeof cell.text === "string") return cell.text.trim();
+  if ("error" in cell) {
+    throw new Error(`Worksheet row ${rowNumber}, column ${columnNumber} contains an Excel error.`);
+  }
+  throw new Error(`Worksheet row ${rowNumber}, column ${columnNumber} has an unsupported cell type.`);
 }
 
 async function parseXlsx(buffer: Buffer, sheet?: string): Promise<ParsedFile> {
@@ -93,18 +151,18 @@ async function parseXlsx(buffer: Buffer, sheet?: string): Promise<ParsedFile> {
   const rows: Record<string, string>[] = [];
   ws.eachRow((row, rowNumber) => {
     if (rowNumber === 1) {
-      row.eachCell((cell, colNumber) => {
-        columns[colNumber - 1] = String(cell.value ?? `column_${colNumber}`).trim();
-      });
+      for (let colNumber = 1; colNumber <= ws.columnCount; colNumber++) {
+        const cell = row.getCell(colNumber);
+        columns[colNumber - 1] = xlsxCellText(cell.value, rowNumber, colNumber)
+          || `column_${colNumber}`;
+      }
+      assertUniqueHeaders(columns, "XLSX");
       return;
     }
     const record: Record<string, string> = {};
     columns.forEach((c, i) => {
       const cell = row.getCell(i + 1);
-      let v = cell.value;
-      if (v && typeof v === "object" && "text" in (v as object)) v = (v as { text: string }).text;
-      if (v instanceof Date) v = v.toISOString().slice(0, 10);
-      record[c] = v === null || v === undefined ? "" : String(v).trim();
+      record[c] = xlsxCellText(cell.value, rowNumber, i + 1);
     });
     if (Object.values(record).some((v) => v !== "")) rows.push(record);
   });
