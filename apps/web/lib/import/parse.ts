@@ -44,10 +44,10 @@ export function checkFile(name: string, size: number, mime: string): string | nu
 function assertUniqueHeaders(
   columns: string[],
   source: "CSV" | "XLSX",
-  renamedHeaders: Record<string, string> = {},
+  renamedHeaders: Record<string, string> | null | undefined = {},
 ): void {
   const seen = new Map<string, string>();
-  const duplicates = new Set(Object.values(renamedHeaders));
+  const duplicates = new Set(Object.values(renamedHeaders ?? {}));
   for (const column of columns) {
     const normalized = column.toLowerCase();
     const existing = seen.get(normalized);

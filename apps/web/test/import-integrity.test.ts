@@ -4,6 +4,12 @@ import { parseImportFile } from "@/lib/import/parse";
 import { buildRawDataset, inferRawVariables } from "@/lib/import/raw-dataset";
 
 describe("CSV structural integrity", () => {
+  it("accepts unique headers when Papa Parse reports no renamed headers", async () => {
+    const parsed = await parseImportFile(Buffer.from("id,score\nA,2\n"), "valid.csv");
+    expect(parsed.columns).toEqual(["id", "score"]);
+    expect(parsed.rows).toEqual([{ id: "A", score: "2" }]);
+  });
+
   it.each([
     ["too many fields", "a,b\n1,2\n3,4,5\n", /TooManyFields/],
     ["too few fields", "a,b\n1,2\n3\n", /TooFewFields/],
