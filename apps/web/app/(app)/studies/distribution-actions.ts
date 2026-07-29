@@ -15,7 +15,8 @@ function token(prefix: string): string {
 export async function createPublicLink(studyId: string, name: string) {
   const result = await withAuthorized("distributions.create", async (tx, session) => {
     const [version] = await tx`
-      select id from study_versions where study_id = ${studyId}
+      select id from study_versions
+      where study_id = ${studyId} and org_id = ${session.orgId}
       order by version_number desc limit 1`;
     if (!version) throw new Error("Publicér studiet, før du opretter links.");
     const publicToken = token("pub");
@@ -55,14 +56,16 @@ export async function createPanelInvite(input: InviteInput) {
   const result = await withAuthorized("distributions.create", async (tx, session) => {
     const [version] = await tx`
       select v.id, v.version_number, s.title from study_versions v
-      join studies s on s.id = v.study_id
-      where v.study_id = ${input.studyId}
+      join studies s on s.id = v.study_id and s.org_id = ${session.orgId}
+      where v.study_id = ${input.studyId} and v.org_id = ${session.orgId}
       order by v.version_number desc limit 1`;
     if (!version) throw new Error("Publicér studiet, før du inviterer panelister.");
 
     let segment = null;
     if (input.segmentId) {
-      const [seg] = await tx`select definition from segments where id = ${input.segmentId}`;
+      const [seg] = await tx`
+        select definition from segments
+        where id = ${input.segmentId} and org_id = ${session.orgId}`;
       if (seg) segment = segmentDefinition.parse(seg.definition);
     }
     // Målgruppen afgøres over hele populationen; kontaktloft anvendes efter
@@ -92,7 +95,8 @@ export async function createPanelInvite(input: InviteInput) {
       returning id`;
 
     const panelists = await tx`
-      select id, email, first_name, language from panelists where id = any(${selected}) and email is not null`;
+      select id, email, first_name, language from panelists
+      where org_id = ${session.orgId} and id = any(${selected}) and email is not null`;
     for (const p of panelists) {
       const invToken = token("inv");
       const [inv] = await tx`
