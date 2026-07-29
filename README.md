@@ -32,6 +32,7 @@ separate tools for panel management, UX research studies, operational CX
 See `docs/cx-platform-build-and-qa-plan.md` (unified roadmap + gates),
 `docs/github-vercel-implementation-runbook.md` (manual release steps),
 `docs/architecture.md`, `docs/implementation-plan.md` (status + honest gap list),
+`docs/hosted-readiness.md` (runtime health, env roles, backup/monitoring/rollback),
 `docs/source-capability-matrix.md` (product research evidence), and `docs/adr/`
 (key decisions). Screenshots: `docs/screenshots/`.
 
