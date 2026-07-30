@@ -76,6 +76,9 @@ export function PanelTable({ rows, canEdit }: { rows: PanelRow[]; canEdit: boole
           <Link href={`/panel/${info.row.original.id}`} className="font-medium text-accent hover:underline">
             {info.getValue()}
           </Link>
+          <Link href={`/panel/${info.row.original.id}`} className="mt-1 block text-[11px] font-semibold uppercase tracking-wide text-muted hover:text-accent hover:underline">
+            View profile
+          </Link>
           {info.row.original.tags.length > 0 && (
             <div className="mt-1 flex flex-wrap gap-1">
               {info.row.original.tags.map((tag) => <Badge key={tag} tone="blue">{tag}</Badge>)}

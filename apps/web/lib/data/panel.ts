@@ -2,6 +2,13 @@ import { randomSample, type SegmentDefinition, type SegmentFilter } from "@ok/do
 import type { Tx } from "../db";
 
 /** Panel data access: list/filter/segment SQL, profile, governance checks. */
+export type PanelFilterField = "uddannelse" | "opvarmningskilde" | "tag" | "message_open" | "custom" | "customer_status";
+export interface PanelFilterGroup {
+  field: PanelFilterField;
+  operator: "any" | "all" | "none";
+  values: string[];
+  key?: string;
+}
 
 export interface PanelListParams {
   q?: string;
@@ -10,6 +17,7 @@ export interface PanelListParams {
   customerStatus?: string;
   language?: string;
   segment?: SegmentDefinition | null;
+  filters?: PanelFilterGroup[];
   sort?: "name" | "created" | "email";
   limit?: number;
   offset?: number;
@@ -61,6 +69,38 @@ function segmentConditions(tx: Tx, filters: SegmentFilter[]) {
 }
 
 /** Combined WHERE fragment for all panelist filters (shared by paged list and audience building). */
+
+function panelFilterCondition(tx: Tx, group: PanelFilterGroup, value: string) {
+  if (group.field === "tag") {
+    return tx`exists (select 1 from panelist_tags pt join tags tg on tg.id = pt.tag_id where pt.panelist_id = p.id and pt.org_id = p.org_id and tg.org_id = p.org_id and tg.name = ${value})`;
+  }
+  if (group.field === "message_open") {
+    const separator = value.indexOf(":");
+    const mode = separator > 0 ? value.slice(0, separator) : "opened";
+    const distributionId = separator > 0 ? value.slice(separator + 1) : value;
+    const opened = tx`exists (select 1 from contact_events ce where ce.panelist_id = p.id and ce.distribution_id = ${distributionId} and ce.event_type = 'opened')`;
+    return mode === "not_opened" ? tx`not ${opened}` : opened;
+  }
+  if (group.field === "customer_status") return tx`p.customer_status = ${value}`;
+  const key = group.field === "custom" ? group.key ?? "" : group.field;
+  if (!key) return tx`false`;
+  return tx`exists (select 1 from panelist_attributes pa join custom_fields cf on cf.id = pa.field_id where pa.panelist_id = p.id and cf.org_id = p.org_id and cf.key = ${key} and pa.value @> ${tx.json(value as never)})`;
+}
+function panelFilterConditions(tx: Tx, filters: PanelFilterGroup[]) {
+  const conditions = [];
+  for (const group of filters) {
+    const values = group.values.filter(Boolean);
+    if (values.length === 0) continue;
+    if (group.operator === "all") {
+      conditions.push(...values.map((value) => panelFilterCondition(tx, group, value)));
+      continue;
+    }
+    let combined = tx`false`;
+    for (const value of values) combined = tx`${combined} or ${panelFilterCondition(tx, group, value)}`;
+    conditions.push(group.operator === "none" ? tx`not (${combined})` : combined);
+  }
+  return conditions;
+}
 function panelistWhere(tx: Tx, params: PanelListParams) {
   const conds = [];
   if (params.q) {
@@ -75,6 +115,7 @@ function panelistWhere(tx: Tx, params: PanelListParams) {
                   where pt.panelist_id = p.id and tg.name = ${params.tag})`);
   }
   if (params.segment) conds.push(...segmentConditions(tx, params.segment.filters));
+  if (params.filters) conds.push(...panelFilterConditions(tx, params.filters));
 
   let where = tx`true`;
   for (const c of conds) where = tx`${where} and ${c}`;
@@ -96,7 +137,7 @@ export async function listPanelists(tx: Tx, params: PanelListParams) {
     select p.id, p.external_id, p.first_name, p.last_name, p.email, p.language, p.birth_year,
            p.gender, p.city, p.customer_status, p.lifecycle, p.created_at,
            coalesce((select array_agg(tg.name order by tg.name) from panelist_tags pt
-                     join tags tg on tg.id = pt.tag_id where pt.panelist_id = p.id), '{}') as tags,
+                     join tags tg on tg.id = pt.tag_id where pt.panelist_id = p.id and pt.org_id = p.org_id), '{}') as tags,
            exists (select 1 from consent_records cr where cr.panelist_id = p.id
                    and cr.purpose = 'survey_contact' and cr.status = 'granted') as has_consent
     from panelists p
@@ -252,6 +293,7 @@ export async function resolveAudience(
   input: {
     orgId: string;
     segment?: SegmentDefinition | null;
+    filters?: PanelFilterGroup[];
     method: "all" | "random";
     sampleSize?: number;
     seed?: number;
@@ -277,7 +319,7 @@ export async function resolveAudience(
       throw new Error("Audience seed must be an integer between 0 and 4294967295.");
     }
   }
-  const candidates = await listPanelistIds(tx, { segment: input.segment ?? null, lifecycle: "active" });
+  const candidates = await listPanelistIds(tx, { segment: input.segment ?? null, filters: input.filters, lifecycle: "active" });
   const governance = await getGovernance(tx, input.orgId);
   const { eligible, excluded } = await applyGovernance(tx, candidates, governance);
 

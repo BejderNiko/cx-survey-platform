@@ -35,6 +35,22 @@ const DEFAULT_COLUMN_MAP: Record<string, string> = {
   tags: "tags", tag: "tags", labels: "tags",
 };
 
+const DEFAULT_ATTRIBUTE_MAP: Record<string, string> = {
+  age: "attr:age", alder: "attr:age",
+  joined_date: "attr:joined_date", joineddate: "attr:joined_date",
+  last_test_date: "attr:last_test_date", lasttestdate: "attr:last_test_date",
+  tests_completed: "attr:tests_completed", testscompleted: "attr:tests_completed",
+  uddannelse: "attr:uddannelse", education: "attr:uddannelse",
+  arbejdsstatus: "attr:arbejdsstatus", employment_status: "attr:arbejdsstatus",
+  bopael: "attr:bopael", residence: "attr:bopael",
+  bil: "attr:bil", car: "attr:bil",
+  opvarmningskilde: "attr:opvarmningskilde", heating_source: "attr:opvarmningskilde",
+  undersoegelsesformer: "attr:undersoegelsesformer", survey_formats: "attr:undersoegelsesformer",
+  produkter_og_kunde_hos_ok: "attr:produkter_og_kunde_hos_ok", products_and_customer_at_ok: "attr:produkter_og_kunde_hos_ok",
+  type_af_mobiltelefon: "attr:type_af_mobiltelefon", mobile_phone_type: "attr:type_af_mobiltelefon",
+  boligtype: "attr:boligtype", housing_type: "attr:boligtype",
+  baeredygtigere_stroem: "attr:baeredygtigere_stroem", sustainable_power: "attr:baeredygtigere_stroem",
+};
 function normalizeColumn(column: string): string {
   return column.trim().toLowerCase()
     .replace(/æ/g, "ae").replace(/ø/g, "oe").replace(/å/g, "aa")
@@ -51,6 +67,7 @@ async function fixedImportConfig(tx: Tx, orgId: string, columns: string[]) {
   for (const column of columns) {
     const normalized = normalizeColumn(column);
     const target = DEFAULT_COLUMN_MAP[normalized]
+      ?? DEFAULT_ATTRIBUTE_MAP[normalized]
       ?? (customKeys.has(normalized) ? `attr:${normalized}` : "");
     mapping[column] = target && !usedTargets.has(target) ? target : "";
     if (mapping[column]) usedTargets.add(mapping[column]);

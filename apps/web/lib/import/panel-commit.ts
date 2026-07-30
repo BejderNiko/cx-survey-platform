@@ -359,6 +359,21 @@ async function insertCreateConsents(
   }
 }
 
+async function ensureImportedAttributeFields(
+  tx: Tx,
+  orgId: string,
+  rows: PanelistWrite[],
+): Promise<void> {
+  const keys = [...new Set(rows.flatMap((row) => Object.keys(row.attributes)))];
+  for (const key of keys) {
+    const label = key.replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase());
+    const fieldType = key === "age" || key === "tests_completed" ? "number" : "text";
+    await tx`
+      insert into custom_fields (org_id, key, label, field_type)
+      values (${orgId}, ${key}, ${label}, ${fieldType})
+      on conflict (org_id, key) do nothing`;
+  }
+}
 async function upsertAttributes(
   tx: Tx,
   orgId: string,
@@ -465,6 +480,7 @@ export async function writePanelImport(
     input.filename,
     creates.map((row) => row.id),
   );
+  await ensureImportedAttributeFields(tx, input.orgId, [...creates, ...updates]);
   await upsertAttributes(tx, input.orgId, [...creates, ...updates]);
   await replaceImportedTags(tx, input.orgId, [...creates, ...updates]);
 
