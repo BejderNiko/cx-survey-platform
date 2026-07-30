@@ -5,6 +5,7 @@ import { StatusBadge } from "@/components/ui";
 import { requireSession } from "@/lib/auth";
 import { withUser } from "@/lib/db";
 import { STUDY_STATUS, STUDY_STATUS_TONE, label } from "@/lib/labels";
+import { getStudyShell } from "@/lib/data/studies";
 import { StudyTabs } from "./study-tabs";
 
 /** Fælles studiehoved med titel, status og faner (Byg · Udsend · Resultater). */
@@ -19,16 +20,12 @@ export default async function StudyLayout({
   const { id } = await params;
 
   const data = await withUser(session.userId, session.orgId, async (tx) => {
-    const [study] = await tx`
-      select s.id, s.title, s.status, w.name as workspace, u.full_name as owner
-      from studies s
-      join workspaces w on w.id = s.workspace_id
-      join users u on u.id = s.owner_id
-      where s.id = ${id}`;
+    const study = await getStudyShell(tx, session.orgId, id);
     if (!study) return null;
     const [counts] = await tx`
       select count(*) filter (where status = 'completed') as completed
-      from responses where study_id = ${id}`;
+      from responses
+      where study_id = ${id} and org_id = ${session.orgId}`;
     return { study, completed: Number(counts.completed) };
   });
   if (!data) notFound();

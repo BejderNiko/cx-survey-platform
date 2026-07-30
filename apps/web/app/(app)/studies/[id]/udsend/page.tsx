@@ -16,21 +16,21 @@ export default async function StudyDistributionPage({ params }: { params: Promis
   const { id } = await params;
 
   const data = await withUser(session.userId, session.orgId, async (tx) => {
-    const [study] = await tx`select id, status from studies where id = ${id}`;
+    const [study] = await tx`select id, status from studies where id = ${id} and org_id = ${session.orgId}`;
     if (!study) return null;
     const [distributions, funnel, outbox, segments] = await Promise.all([
       tx`select d.id, d.kind, d.name, d.status, d.public_token, d.audience_snapshot, d.created_at,
-                (select count(*) from invitations i where i.distribution_id = d.id) as invitations,
-                (select count(*) from responses r where r.distribution_id = d.id and r.status = 'completed') as completed
-         from distributions d where d.study_id = ${id} order by d.created_at desc`,
+                (select count(*) from invitations i where i.distribution_id = d.id and i.org_id = ${session.orgId}) as invitations,
+                (select count(*) from responses r where r.distribution_id = d.id and r.org_id = ${session.orgId} and r.status = 'completed') as completed
+         from distributions d where d.study_id = ${id} and d.org_id = ${session.orgId} order by d.created_at desc`,
       tx`select i.status::text, count(*)::int as count
-         from invitations i join distributions d on d.id = i.distribution_id
-         where d.study_id = ${id} group by i.status`,
+         from invitations i join distributions d on d.id = i.distribution_id and d.org_id = ${session.orgId}
+         where d.study_id = ${id} and i.org_id = ${session.orgId} group by i.status`,
       tx`select o.id, o.to_address, o.subject, o.body, o.status, o.created_at, d.name as distribution
-         from outbox_messages o join distributions d on d.id = o.distribution_id
-         where d.study_id = ${id}
+         from outbox_messages o join distributions d on d.id = o.distribution_id and d.org_id = ${session.orgId}
+         where d.study_id = ${id} and o.org_id = ${session.orgId}
          order by o.created_at desc limit 50`,
-      tx`select id, name from segments order by name`,
+      tx`select id, name from segments where org_id = ${session.orgId} order by name`,
     ]);
     return { study, distributions, funnel, outbox, segments };
   });

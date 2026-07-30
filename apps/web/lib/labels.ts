@@ -123,6 +123,7 @@ export const CONSENT_STATUS: Record<string, string> = {
 };
 
 export const IMPORT_STATUS: Record<string, string> = {
+  committing: "Gemmer i database",
   parsed: "Indlæst",
   dry_run: "Prøvekørsel",
   committed: "Gennemført",

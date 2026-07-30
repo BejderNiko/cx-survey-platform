@@ -8,7 +8,7 @@ import { commitStep, dryRunStep, parseStep } from "./actions";
 
 type ParseResult = Awaited<ReturnType<typeof parseStep>>;
 type CommitResult = Awaited<ReturnType<typeof commitStep>>;
-type UploadStatus = "idle" | "selected" | "uploading" | "imported" | "error";
+type UploadStatus = "idle" | "selected" | "dry_run" | "committing" | "committed" | "failed";
 
 interface Batch {
   id: string;
@@ -18,16 +18,17 @@ interface Batch {
   createdAt: string;
   errorCount: number;
   author: string;
+  failureMessage: string | null;
 }
 
 const STATUS_TEXT: Record<UploadStatus, string> = {
   idle: "Ingen fil valgt",
   selected: "Valgt",
-  uploading: "Importerer",
-  imported: "Importeret",
-  error: "Fejl",
+  dry_run: "Prøvekørsel gennemført",
+  committing: "Gemmer i database",
+  committed: "Databasecommit gennemført",
+  failed: "Fejlet",
 };
-
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
@@ -66,7 +67,7 @@ export function ImportWizard({ history }: { history: Batch[] }) {
       try {
         setParsed(await parseStep(form));
       } catch (caught) {
-        setStatus("error");
+        setStatus("failed");
         setError(caught instanceof Error ? caught.message : "Filen kunne ikke læses.");
       }
     });
@@ -76,19 +77,22 @@ export function ImportWizard({ history }: { history: Batch[] }) {
     startTransition(async () => {
       setError(null);
       setResult(null);
-      setStatus("uploading");
+
       try {
         const dryRun = await dryRunStep(buildForm());
+        setStatus("dry_run");
         if (dryRun.counts.valid === 0) {
           throw new Error(dryRun.errors[0]?.message ?? "Filen indeholder ingen gyldige rækker.");
         }
+        setStatus("committing");
         const committed = await commitStep(buildForm({ batchId: dryRun.batchId }));
         setResult(committed);
-        setStatus("imported");
+        setStatus("committed");
         router.refresh();
       } catch (caught) {
-        setStatus("error");
+        setStatus("failed");
         setError(caught instanceof Error ? caught.message : "Importen fejlede.");
+        router.refresh();
       }
     });
   }
@@ -128,7 +132,7 @@ export function ImportWizard({ history }: { history: Batch[] }) {
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          <Badge tone={status === "error" ? "red" : status === "imported" ? "green" : status === "uploading" ? "blue" : "gray"}>
+          <Badge tone={status === "failed" ? "red" : status === "committed" ? "green" : status === "committing" || status === "dry_run" ? "blue" : "gray"}>
             {STATUS_TEXT[status]}
           </Badge>
           {file && <span className="text-sm">{file.name} · {formatBytes(file.size)}</span>}
@@ -148,12 +152,12 @@ export function ImportWizard({ history }: { history: Batch[] }) {
         </p>
 
         <Button className="mt-4" disabled={!file || !parsed || !consentConfirmed || pending} onClick={runImport}>
-          {status === "uploading" ? "Importerer…" : "Importér fil"}
+          {status === "committing" ? "Gemmer i database…" : status === "dry_run" ? "Prøvekørsel færdig…" : "Importér fil"}
         </Button>
         {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
         {result && (
           <p role="status" className="mt-3 text-sm text-success">
-            {result.counts.create} oprettet · {result.counts.update} opdateret · {result.counts.invalid} ugyldige.
+            Databasecommit bekræftet: {result.counts.before} før + {result.counts.create} oprettet = {result.counts.after} efter · {result.counts.update} opdateret · {result.counts.invalid} ugyldige.
             {result.errorCount > 0 && (
               <> <a className="underline" href={`/api/import-batches/${result.batchId}/errors`}>Hent fejlrapport</a>.</>
             )}
@@ -168,7 +172,12 @@ export function ImportWizard({ history }: { history: Batch[] }) {
             {history.map((batch) => (
               <tr key={batch.id}>
                 <Td>{batch.filename}</Td>
-                <Td><Badge tone={batch.status === "committed" ? "green" : batch.status === "failed" ? "red" : "gray"}>{label(IMPORT_STATUS, batch.status)}</Badge></Td>
+                <Td>
+                  <Badge tone={batch.status === "committed" ? "green" : batch.status === "failed" ? "red" : batch.status === "committing" ? "blue" : "gray"}>
+                    {label(IMPORT_STATUS, batch.status)}
+                  </Badge>
+                  {batch.failureMessage && <p className="mt-1 max-w-xs text-xs text-danger">{batch.failureMessage}</p>}
+                </Td>
                 <Td className="text-xs">{batch.counts.create ?? 0} oprettet · {batch.counts.update ?? 0} opdateret · {batch.counts.invalid ?? 0} ugyldige</Td>
                 <Td>{batch.errorCount > 0 ? <a className="text-accent underline" href={`/api/import-batches/${batch.id}/errors`}>{batch.errorCount} rækker</a> : "0"}</Td>
                 <Td>{batch.author}</Td>

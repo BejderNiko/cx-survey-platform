@@ -5,7 +5,18 @@ import { NextResponse, type NextRequest } from "next/server";
  * Cryptographic session verification happens server-side in requireSession();
  * this proxy only checks cookie presence for fast redirects.
  */
-const PUBLIC_PREFIXES = ["/login", "/s/", "/i/", "/r/", "/api/respond", "/api/recruit", "/api/import/firecrawl", "/_next", "/favicon"];
+const PUBLIC_PREFIXES = [
+  "/login",
+  "/s/",
+  "/i/",
+  "/r/",
+  "/api/health/readiness",
+  "/api/respond",
+  "/api/recruit",
+  "/api/import/firecrawl",
+  "/_next",
+  "/favicon",
+];
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -22,5 +33,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/health/readiness).*)"],
 };

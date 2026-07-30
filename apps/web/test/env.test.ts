@@ -19,6 +19,8 @@ const MANAGED = [
 ] as const;
 
 const saved: Partial<Record<(typeof MANAGED)[number], string | undefined>> = {};
+const HOSTED_SESSION_SECRET = "session-secret-0123456789-ABCDEFGHIJK";
+const HOSTED_ANALYTICS_SECRET = "analytics-secret-0123456789-ABCDEFG";
 
 beforeEach(() => {
   for (const key of MANAGED) {
@@ -158,11 +160,11 @@ describe("Vercel Preview/Production require full configuration", () => {
     process.env.DATABASE_ADMIN_URL = "postgres://postgres@db.example.supabase.co:5432/postgres";
     process.env.ANALYTICS_URL = "https://analytics.example.vercel.app";
     process.env.APP_BASE_URL = "https://cx.example.ok.dk";
-    process.env.SESSION_SECRET = "long-random-secret";
-    process.env.ANALYTICS_API_SECRET = "bearer-secret";
+    process.env.SESSION_SECRET = HOSTED_SESSION_SECRET;
+    process.env.ANALYTICS_API_SECRET = HOSTED_ANALYTICS_SECRET;
     const env = await loadEnv();
     expect(env.databaseUrl).toContain("supabase.co");
-    expect(env.analyticsApiSecret).toBe("bearer-secret");
+    expect(env.analyticsApiSecret).toBe(HOSTED_ANALYTICS_SECRET);
   });
 });
 
@@ -207,6 +209,82 @@ describe("loopback targets are rejected on deployed Vercel", () => {
   });
 });
 
+describe("hosted role and HTTPS separation", () => {
+  function hostedBase() {
+    process.env.VERCEL = "1";
+    process.env.VERCEL_ENV = "production";
+    process.env.DATABASE_URL = "postgres://cx_app_hosted.ref@db.example.supabase.co:6543/postgres";
+    process.env.DATABASE_ADMIN_URL = "postgres://cx_admin@db.example.supabase.co:5432/postgres";
+    process.env.ANALYTICS_URL = "https://analytics.example.internal";
+    process.env.APP_BASE_URL = "https://cx.example.internal";
+    process.env.SESSION_SECRET = HOSTED_SESSION_SECRET;
+    process.env.ANALYTICS_API_SECRET = HOSTED_ANALYTICS_SECRET;
+  }
+
+  it("rejects an owner role in DATABASE_URL", async () => {
+    hostedBase();
+    process.env.DATABASE_URL = "postgres://postgres@db.example.supabase.co:6543/postgres";
+    const env = await loadEnv();
+    expect(() => env.databaseUrl).toThrow(/RLS-enforced application role/);
+  });
+
+  it("rejects identical application and privileged database URLs", async () => {
+    hostedBase();
+    process.env.DATABASE_ADMIN_URL = process.env.DATABASE_URL;
+    const env = await loadEnv();
+    expect(() => env.databaseAdminUrl).toThrow(/separate privileged server-only connection/);
+  });
+
+  it("requires HTTPS for analytics and public links", async () => {
+    hostedBase();
+    process.env.ANALYTICS_URL = "http://analytics.example.internal";
+    process.env.APP_BASE_URL = "http://cx.example.internal";
+    const env = await loadEnv();
+    expect(() => env.analyticsUrl).toThrow(/ANALYTICS_URL must use HTTPS/);
+    expect(() => env.appBaseUrl).toThrow(/APP_BASE_URL must use HTTPS/);
+  });
+
+  it("rejects short or whitespace-padded hosted secrets without exposing values", async () => {
+    for (const [name, value] of [
+      ["SESSION_SECRET", "tiny-session-secret"],
+      ["ANALYTICS_API_SECRET", "tiny-analytics-secret"],
+      ["SESSION_SECRET", ` ${"s".repeat(32)}`],
+      ["ANALYTICS_API_SECRET", `${"a".repeat(32)} `],
+      ["SESSION_SECRET", "s".repeat(64)],
+      ["ANALYTICS_API_SECRET", "change-me-analytics-secret-0123456789"],
+    ] as const) {
+      hostedBase();
+      process.env[name] = value;
+      const env = await loadEnv();
+      try {
+        if (name === "SESSION_SECRET") void env.sessionSecret;
+        else void env.analyticsApiSecret;
+        throw new Error(`expected ${name} rejection`);
+      } catch (error) {
+        expect((error as Error).message).toContain(name);
+        expect((error as Error).message).not.toContain(value);
+      }
+    }
+  });
+  it("rejects malformed public URLs without exposing their values", async () => {
+    hostedBase();
+    process.env.ANALYTICS_URL = "not-a-url-analytics-secret";
+    process.env.APP_BASE_URL = "not-a-url-app-secret";
+    const env = await loadEnv();
+    for (const [name, read, secret] of [
+      ["ANALYTICS_URL", () => env.analyticsUrl, "not-a-url-analytics-secret"],
+      ["APP_BASE_URL", () => env.appBaseUrl, "not-a-url-app-secret"],
+    ] as const) {
+      try {
+        read();
+        throw new Error(`expected ${name} rejection`);
+      } catch (error) {
+        expect((error as Error).message).toContain(name);
+        expect((error as Error).message).not.toContain(secret);
+      }
+    }
+  });
+});
 describe("non-Vercel production", () => {
   it("still requires SESSION_SECRET at access time", async () => {
     vi.stubEnv("NODE_ENV", "production");

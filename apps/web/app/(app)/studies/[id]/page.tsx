@@ -13,24 +13,24 @@ export default async function StudyPage({ params }: { params: Promise<{ id: stri
   const { id } = await params;
 
   const data = await withUser(session.userId, session.orgId, async (tx) => {
-    const [study] = await tx`select * from studies where id = ${id}`;
+    const [study] = await tx`select * from studies where id = ${id} and org_id = ${session.orgId}`;
     if (!study) return null;
     const [versions, comments, respStats] = await Promise.all([
-      tx`select v.id, v.version_number, v.published_at, u.full_name as publisher
-         from study_versions v join users u on u.id = v.published_by
-         where v.study_id = ${id} order by v.version_number desc`,
+      tx`select v.id, v.version_number, v.published_at, coalesce(u.full_name, 'Tidligere bruger') as publisher
+         from study_versions v left join users u on u.id = v.published_by
+         where v.study_id = ${id} and v.org_id = ${session.orgId} order by v.version_number desc`,
       tx`select c.id, c.parent_id, c.question_code, c.body, c.status,
-                c.created_at::text, c.resolved_at::text, u.full_name as author,
+                c.created_at::text, c.resolved_at::text, coalesce(u.full_name, 'Tidligere bruger') as author,
                 resolver.full_name as resolved_by_name
          from comments c
-         join users u on u.id = c.author_id
+         left join users u on u.id = c.author_id
          left join users resolver on resolver.id = c.resolved_by
-         where c.study_id = ${id}
+         where c.study_id = ${id} and c.org_id = ${session.orgId}
          order by c.created_at asc limit 200`,
       tx`select count(*) filter (where status = 'completed') as completed,
                 count(*) filter (where status = 'started') as partials,
                 count(*) filter (where status = 'disqualified') as disqualified
-         from responses where study_id = ${id}`,
+         from responses where study_id = ${id} and org_id = ${session.orgId}`,
     ]);
     return { study, versions, comments, respStats: respStats[0] };
   });

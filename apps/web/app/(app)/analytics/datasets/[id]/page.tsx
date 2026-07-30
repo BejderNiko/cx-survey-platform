@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { can } from "@ok/domain";
 import { Badge, Card, PageHeader, Table, Td, Th } from "@/components/ui";
 import { requireSession } from "@/lib/auth";
+import { getDatasetWorkbenchData } from "@/lib/data/analytics";
 import { withUser } from "@/lib/db";
 import { fmtDateTime } from "@/lib/format";
 import { Workbench } from "./workbench";
@@ -18,44 +19,15 @@ export default async function DatasetPage({
   const { id } = await params;
   const sp = await searchParams;
 
-  const data = await withUser(session.userId, session.orgId, async (tx) => {
-    const [dataset] = await tx`
-      select d.*, u.full_name as owner, s.title as study_title, pd.name as parent_name, pd.id as parent_id
-      from datasets d
-      join users u on u.id = d.owner_id
-      left join studies s on s.id = d.source_study_id
-      left join datasets pd on pd.id = d.parent_dataset_id
-      where d.id = ${id}`;
-    if (!dataset) return null;
-    const versions = await tx`
-      select id, version_number, row_count, variable_count, lineage, created_at
-      from dataset_versions where dataset_id = ${id} order by version_number desc`;
-    const currentVersion = sp.v
-      ? versions.find((v) => v.id === sp.v) ?? versions[0]
-      : versions[0];
-    if (!currentVersion) return { dataset, versions, currentVersion: null, variables: [], rows: [], recipes: [], runs: [] };
-    const variables = await tx`
-      select name, label, var_type, measure, value_labels, missing_values, role, position
-      from variables where dataset_version_id = ${currentVersion.id} order by position`;
-    const [versionRows] = await tx`select rows from dataset_versions where id = ${currentVersion.id}`;
-    const recipes = await tx`
-      select ar.id, ar.name, ar.procedure, ar.params, ar.created_at, u.full_name as author
-      from analysis_recipes ar join users u on u.id = ar.created_by
-      where ar.dataset_id = ${id} order by ar.created_at desc`;
-    const runs = await tx`
-      select ar.id, ar.procedure, ar.status, ar.started_at, ar.seed, ar.results, ar.error, u.full_name as author,
-             dv.version_number
-      from analysis_runs ar
-      join dataset_versions dv on dv.id = ar.dataset_version_id
-      join users u on u.id = ar.created_by
-      where dv.dataset_id = ${id}
-      order by ar.started_at desc limit 10`;
-    return {
-      dataset, versions, currentVersion, variables,
-      rows: ((versionRows?.rows ?? []) as Record<string, unknown>[]).slice(0, 50),
-      recipes, runs,
-    };
-  });
+  const data = await withUser(
+    session.userId,
+    session.orgId,
+    (tx) => getDatasetWorkbenchData(tx, {
+      orgId: session.orgId,
+      datasetId: id,
+      requestedVersionId: sp.v,
+    }),
+  );
   if (!data) notFound();
   const { dataset, versions, currentVersion } = data;
   const canRun = can(session.role, "analytics.run");
@@ -68,7 +40,7 @@ export default async function DatasetPage({
         title={dataset.name}
         description={
           <>
-            {dataset.source_kind === "derived" ? "afledt" : "studie"}
+            {dataset.source_kind === "derived" ? "afledt" : dataset.source_kind === "file_import" ? "ekstern rådata" : "studie"}
             {dataset.study_title && <> · fra studiet “{dataset.study_title}”</>}
             {dataset.parent_id && (
               <> · afledt af <Link className="text-accent hover:underline" href={`/analytics/datasets/${dataset.parent_id}`}>{dataset.parent_name}</Link></>

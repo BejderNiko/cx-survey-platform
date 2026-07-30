@@ -5,6 +5,7 @@ import { Badge, Card, EmptyState, LinkButton, ListRow, StatusBadge } from "@/com
 import { requireSession } from "@/lib/auth";
 import { withUser } from "@/lib/db";
 import { fmtDate } from "@/lib/format";
+import { listStudies } from "@/lib/data/studies";
 import { STUDY_STATUS, STUDY_STATUS_TONE, STUDY_TYPE, label } from "@/lib/labels";
 import { CreateStudyForm } from "./create-study-form";
 
@@ -17,21 +18,13 @@ export default async function StudiesPage({
   const sp = await searchParams;
 
   const data = await withUser(session.userId, session.orgId, async (tx) => {
-    const like = sp.q ? "%" + sp.q + "%" : null;
-    const studies = await tx`
-      select s.id, s.title, s.status, s.study_type, s.method_tags, s.updated_at,
-             w.name as workspace, u.full_name as owner,
-             (select count(*) from study_versions v where v.study_id = s.id) as versions,
-             (select count(*) from responses r where r.study_id = s.id and r.status = 'completed') as completed,
-             (select count(*) from distributions d where d.study_id = s.id) as distributions
-      from studies s
-      join workspaces w on w.id = s.workspace_id
-      join users u on u.id = s.owner_id
-      where (${like}::text is null or s.title ilike ${like})
-        and (${sp.status ?? null}::text is null or s.status = ${sp.status ?? null}::study_status)
-      order by s.updated_at desc`;
-    const workspaces = await tx`select id, name from workspaces order by name`;
-    const templates = await tx`select id, name, category from templates order by org_id nulls first, name`;
+    const studies = await listStudies(tx, {
+      orgId: session.orgId,
+      query: sp.q,
+      status: sp.status,
+    });
+    const workspaces = await tx`select id, name from workspaces where org_id = ${session.orgId} order by name`;
+    const templates = await tx`select id, name, category from templates where org_id is null or org_id = ${session.orgId} order by org_id nulls first, name`;
     return { studies, workspaces, templates };
   });
 

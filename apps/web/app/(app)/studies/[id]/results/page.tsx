@@ -29,33 +29,33 @@ export default async function ResultsPage({
   const sp = await searchParams;
 
   const data = await withUser(session.userId, session.orgId, async (tx) => {
-    const [study] = await tx`select id, title, status, draft_definition from studies where id = ${id}`;
+    const [study] = await tx`select id, title, status, draft_definition from studies where id = ${id} and org_id = ${session.orgId}`;
     if (!study) return null;
     const [version] = await tx`
       select id, version_number, definition from study_versions
-      where study_id = ${id} order by version_number desc limit 1`;
+      where study_id = ${id} and org_id = ${session.orgId} order by version_number desc limit 1`;
     const answers = await tx`
       select ra.question_code, ra.value
       from response_answers ra join responses r on r.id = ra.response_id
-      where r.study_id = ${id} and r.status = 'completed'`;
+      where r.study_id = ${id} and r.org_id = ${session.orgId} and ra.org_id = ${session.orgId} and r.status = 'completed'`;
     const [counts] = await tx`
       select count(*) filter (where status = 'completed') as completed,
              count(*) filter (where status = 'started') as partial,
              count(*) filter (where status = 'disqualified') as disqualified,
              count(*) as total
-      from responses where study_id = ${id}`;
+      from responses where study_id = ${id} and org_id = ${session.orgId}`;
     const clicks = await tx`
       select ie.question_code, ie.payload
       from interaction_events ie join responses r on r.id = ie.response_id
-      where r.study_id = ${id} and ie.event_type = 'first_click'`;
+      where r.study_id = ${id} and r.org_id = ${session.orgId} and ie.org_id = ${session.orgId} and ie.event_type = 'first_click'`;
     const rows = await tx`
       select r.id, r.respondent_key, r.status, r.channel, r.started_at,
              v.version_number, p.first_name, p.last_name, p.id as panelist_id,
              (select value from response_answers ra where ra.response_id = r.id and ra.question_type = 'nps' limit 1) as nps
       from responses r
-      join study_versions v on v.id = r.study_version_id
-      left join panelists p on p.id = r.panelist_id
-      where r.study_id = ${id}
+      join study_versions v on v.id = r.study_version_id and v.org_id = ${session.orgId}
+      left join panelists p on p.id = r.panelist_id and p.org_id = ${session.orgId}
+      where r.study_id = ${id} and r.org_id = ${session.orgId}
         and (${sp.status ?? null}::text is null or r.status = ${sp.status ?? null}::response_status)
       order by r.started_at desc
       limit 100`;
@@ -63,7 +63,19 @@ export default async function ResultsPage({
   });
   if (!data) notFound();
 
-  const def = instrumentDefinition.parse(data.version?.definition ?? data.study.draft_definition);
+  const parsedDefinition = instrumentDefinition.safeParse(
+    data.version?.definition ?? data.study.draft_definition,
+  );
+  if (!parsedDefinition.success) {
+    return (
+      <Card title="Studiedata kunne ikke læses">
+        <p role="alert" className="text-sm text-danger">
+          Instrumentversionen er historisk eller ugyldig. Studiet er fundet, men resultater kan ikke beregnes, før definitionen er repareret.
+        </p>
+      </Card>
+    );
+  }
+  const def = parsedDefinition.data;
   const locale: Locale = "da";
   const questions = allQuestions(def);
 

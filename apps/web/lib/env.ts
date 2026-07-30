@@ -117,6 +117,28 @@ function requiredInHosted(name: keyof typeof LOCAL_DEFAULTS): string {
   return LOCAL_DEFAULTS[name];
 }
 
+function validateProductionSecret(
+  name: "SESSION_SECRET" | "ANALYTICS_API_SECRET",
+  value: string,
+): void {
+  if (!productionRuntime()) return;
+  const byteLength = new TextEncoder().encode(value).byteLength;
+  const normalized = value.toLowerCase();
+  const looksLikePlaceholder =
+    /change[-_ ]?me|replace[-_ ]?me|placeholder|your[-_ ]?secret|password|secret123/.test(
+      normalized,
+    );
+  if (
+    value.trim() !== value
+    || byteLength < 32
+    || new Set(value).size < 8
+    || looksLikePlaceholder
+  ) {
+    throw new Error(
+      `${name} must be a randomly generated value of at least 32 bytes with no leading or trailing whitespace in production environments.`,
+    );
+  }
+}
 function databaseTarget(name: "DATABASE_URL" | "DATABASE_ADMIN_URL"): string {
   const value = process.env[name];
   if (value) {
@@ -125,6 +147,28 @@ function databaseTarget(name: "DATABASE_URL" | "DATABASE_ADMIN_URL"): string {
         `${name} points at a loopback address, which cannot be reached from Vercel. ` +
           `Configure the hosted service URL for this environment.`,
       );
+    }
+    if (hostedStrict()) {
+      let target: URL;
+      try {
+        target = new URL(value);
+      } catch {
+        throw new Error(`${name} must be a PostgreSQL connection URL.`);
+      }
+      if (!['postgres:', 'postgresql:'].includes(target.protocol)) {
+        throw new Error(`${name} must be a PostgreSQL connection URL.`);
+      }
+      const username = decodeURIComponent(target.username).split('.')[0]?.toLowerCase();
+      if (name === "DATABASE_URL" && ["postgres", "service_role", "supabase_admin"].includes(username)) {
+        throw new Error(
+          "DATABASE_URL must use the RLS-enforced application role, not an owner or service role.",
+        );
+      }
+      if (name === "DATABASE_ADMIN_URL" && value === process.env.DATABASE_URL) {
+        throw new Error(
+          "DATABASE_ADMIN_URL must be a separate privileged server-only connection from DATABASE_URL.",
+        );
+      }
     }
     return value;
   }
@@ -150,6 +194,33 @@ function connectionTarget(name: "ANALYTICS_URL"): string {
         `Configure the hosted service URL for this environment.`,
     );
   }
+  if (hostedStrict()) {
+    let target: URL;
+    try {
+      target = new URL(value);
+    } catch {
+      throw new Error("ANALYTICS_URL must be an absolute HTTPS URL in Vercel Preview/Production.");
+    }
+    if (target.protocol !== "https:") {
+      throw new Error("ANALYTICS_URL must use HTTPS in Vercel Preview/Production.");
+    }
+  }
+  return value;
+}
+
+function publicTarget(name: "APP_BASE_URL"): string {
+  const value = requiredInHosted(name);
+  if (hostedStrict()) {
+    let target: URL;
+    try {
+      target = new URL(value);
+    } catch {
+      throw new Error("APP_BASE_URL must be an absolute HTTPS URL in Vercel Preview/Production.");
+    }
+    if (target.protocol !== "https:") {
+      throw new Error("APP_BASE_URL must use HTTPS in Vercel Preview/Production.");
+    }
+  }
   return value;
 }
 
@@ -171,14 +242,17 @@ export const env = {
   },
   get sessionSecret(): string {
     const value = process.env.SESSION_SECRET;
-    if (value) return value;
+    if (value) {
+      validateProductionSecret("SESSION_SECRET", value);
+      return value;
+    }
     if (hostedStrict() || process.env.NODE_ENV === "production") {
       throw new Error("SESSION_SECRET must be set in production environments.");
     }
     return LOCAL_DEFAULTS.SESSION_SECRET;
   },
   get appBaseUrl(): string {
-    return requiredInHosted("APP_BASE_URL");
+    return publicTarget("APP_BASE_URL");
   },
   get analyticsUrl(): string {
     return connectionTarget("ANALYTICS_URL");
@@ -191,6 +265,17 @@ export const env = {
           "The analytics service requires bearer authentication outside local development.",
       );
     }
+    if (value) validateProductionSecret("ANALYTICS_API_SECRET", value);
     return value;
   },
 };
+/** Validate every mandatory hosted dependency at runtime without exposing values. */
+export function assertHostedRuntimeConfiguration(): void {
+  if (!hostedStrict()) return;
+  void env.databaseUrl;
+  void env.databaseAdminUrl;
+  void env.sessionSecret;
+  void env.appBaseUrl;
+  void env.analyticsUrl;
+  void env.analyticsApiSecret;
+}

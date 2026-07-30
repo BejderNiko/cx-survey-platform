@@ -28,6 +28,11 @@ export async function createStudy(input: {
   studyType?: string;
 }) {
   const studyId = await withAuthorized("studies.create", async (tx, session) => {
+    const [workspace] = await tx`
+      select id from workspaces
+      where id = ${input.workspaceId} and org_id = ${session.orgId}`;
+    if (!workspace) throw new Error("Workspacet blev ikke fundet.");
+
     let definition: InstrumentDefinition = BLANK_SURVEY;
     let methodTags: string[] = [];
     if (input.templateId) {
@@ -54,9 +59,13 @@ export async function createStudy(input: {
 
 export async function updateDraft(studyId: string, definitionRaw: unknown) {
   const def = toDanishDraft(instrumentDefinition.parse(definitionRaw));
-  await withAuthorized("studies.edit", async (tx) => {
-    await tx`update studies set draft_definition = ${tx.json(def as never)}, updated_at = now()
-             where id = ${studyId} and status in ('draft','review','live','paused')`;
+  await withAuthorized("studies.edit", async (tx, session) => {
+    const updated = await tx`
+      update studies set draft_definition = ${tx.json(def as never)}, updated_at = now()
+      where id = ${studyId} and org_id = ${session.orgId}
+        and status in ('draft','review','live','paused')
+      returning id`;
+    if (updated.length !== 1) throw new Error("Studiet blev ikke fundet eller kan ikke redigeres.");
   });
   revalidatePath(`/studies/${studyId}`);
   return { ok: true, problems: validateInstrument(def) };
@@ -64,7 +73,9 @@ export async function updateDraft(studyId: string, definitionRaw: unknown) {
 
 export async function publishStudy(studyId: string) {
   const result = await withAuthorized("studies.publish", async (tx, session) => {
-    const [study] = await tx`select draft_definition, status from studies where id = ${studyId}`;
+    const [study] = await tx`
+      select draft_definition, status from studies
+      where id = ${studyId} and org_id = ${session.orgId}`;
     if (!study) throw new Error("Studiet blev ikke fundet");
     const def = instrumentDefinition.parse(study.draft_definition);
     const problems = validateInstrument(def);
@@ -78,12 +89,16 @@ export async function publishStudy(studyId: string) {
     if (types.has("ces")) metricDefs.ces = METRIC_DEFINITIONS.ces;
 
     const [next] = await tx`
-      select coalesce(max(version_number), 0) + 1 as v from study_versions where study_id = ${studyId}`;
+      select coalesce(max(version_number), 0) + 1 as v
+      from study_versions
+      where study_id = ${studyId} and org_id = ${session.orgId}`;
     await tx`
       insert into study_versions (org_id, study_id, version_number, definition, metric_definitions, published_by)
       values (${session.orgId}, ${studyId}, ${next.v}, ${tx.json(def as never)},
               ${tx.json(metricDefs as never)}, ${session.userId})`;
-    await tx`update studies set status = 'live', updated_at = now() where id = ${studyId}`;
+    await tx`
+      update studies set status = 'live', updated_at = now()
+      where id = ${studyId} and org_id = ${session.orgId}`;
     await audit(tx, {
       orgId: session.orgId, actorUserId: session.userId,
       action: "study.publish", entityType: "study", entityId: studyId,
@@ -97,7 +112,11 @@ export async function publishStudy(studyId: string) {
 
 export async function setStudyStatus(studyId: string, status: "paused" | "closed" | "live" | "archived") {
   await withAuthorized("studies.close", async (tx, session) => {
-    await tx`update studies set status = ${status}::study_status, updated_at = now() where id = ${studyId}`;
+    const updated = await tx`
+      update studies set status = ${status}::study_status, updated_at = now()
+      where id = ${studyId} and org_id = ${session.orgId}
+      returning id`;
+    if (updated.length !== 1) throw new Error("Studiet blev ikke fundet.");
     await audit(tx, {
       orgId: session.orgId, actorUserId: session.userId,
       action: `study.${status}`, entityType: "study", entityId: studyId,
@@ -116,11 +135,16 @@ export async function deleteStudy(studyId: string): Promise<DeleteStudyResult> {
   const result = await withAuthorized("studies.delete", async (tx, session) => {
     const [study] = await tx`
       select s.status,
-             (select count(*)::int from study_versions v where v.study_id = s.id) as versions,
-             (select count(*)::int from distributions d where d.study_id = s.id) as distributions,
-             (select count(*)::int from responses r where r.study_id = s.id) as responses,
-             (select count(*)::int from followup_rules f where f.study_id = s.id) as followup_rules,
-             (select count(*)::int from datasets ds where ds.source_study_id = s.id) as datasets
+             (select count(*)::int from study_versions v
+              where v.study_id = s.id and v.org_id = ${session.orgId}) as versions,
+             (select count(*)::int from distributions d
+              where d.study_id = s.id and d.org_id = ${session.orgId}) as distributions,
+             (select count(*)::int from responses r
+              where r.study_id = s.id and r.org_id = ${session.orgId}) as responses,
+             (select count(*)::int from followup_rules f
+              where f.study_id = s.id and f.org_id = ${session.orgId}) as followup_rules,
+             (select count(*)::int from datasets ds
+              where ds.source_study_id = s.id and ds.org_id = ${session.orgId}) as datasets
       from studies s
       where s.id = ${studyId} and s.org_id = ${session.orgId}
       for update`;
@@ -179,7 +203,7 @@ export async function deleteStudy(studyId: string): Promise<DeleteStudyResult> {
 export async function duplicateStudy(studyId: string) {
   const newId = await withAuthorized("studies.create", async (tx, session) => {
     const [src] = await tx`select title, workspace_id, study_type, method_tags, draft_definition, theme, settings
-                           from studies where id = ${studyId}`;
+                           from studies where id = ${studyId} and org_id = ${session.orgId}`;
     if (!src) throw new Error("Studiet blev ikke fundet");
     const draftDefinition = toDanishDraft(instrumentDefinition.parse(src.draft_definition));
     const [copy] = await tx`

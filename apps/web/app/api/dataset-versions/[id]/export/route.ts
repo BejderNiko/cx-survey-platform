@@ -13,11 +13,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   try {
     const out = await withAuthorized("datasets.export", async (tx, session) => {
-      const payload = await loadDatasetPayload(tx, id);
+      const payload = await loadDatasetPayload(tx, session.orgId, id);
       if (!payload) return null;
       const [info] = await tx`
         select d.name, dv.version_number from dataset_versions dv
-        join datasets d on d.id = dv.dataset_id where dv.id = ${id}`;
+        join datasets d on d.id = dv.dataset_id and d.org_id = ${session.orgId}
+        where dv.id = ${id} and dv.org_id = ${session.orgId}`;
       const filename = `${info.name}-v${info.version_number}`.replace(/[^\w.-]+/g, "_");
       const res = await exportDatasetRemote(format, payload, filename);
       await audit(tx, {
