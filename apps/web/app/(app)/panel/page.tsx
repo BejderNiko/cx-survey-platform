@@ -59,7 +59,6 @@ export default async function PanelPage({
         description={`${data.total} panelister matcher de aktuelle filtre`}
         actions={
           <>
-            <LinkButton href="/panel/segments">Segmenter</LinkButton>
             <LinkButton href="/panel/recruitment">Rekruttering</LinkButton>
             {can(session.role, "panel.import") && <LinkButton href="/panel/import" variant="primary">Importér</LinkButton>}
           </>

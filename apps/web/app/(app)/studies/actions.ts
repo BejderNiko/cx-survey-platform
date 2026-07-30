@@ -58,14 +58,22 @@ export async function createStudy(input: {
   redirect(`/studies/${studyId}/builder`);
 }
 
-export async function updateDraft(studyId: string, definitionRaw: unknown) {
+export async function updateDraft(studyId: string, definitionRaw: unknown, titleRaw?: string) {
   const def = toDanishDraft(instrumentDefinition.parse(definitionRaw));
+  const title = titleRaw?.trim();
+  if (titleRaw !== undefined && !title) throw new Error("Studienavn skal udfyldes.");
   await withAuthorized("studies.edit", async (tx, session) => {
-    const updated = await tx`
-      update studies set draft_definition = ${tx.json(def as never)}, updated_at = now()
-      where id = ${studyId} and org_id = ${session.orgId}
-        and status in ('draft','review','live','paused')
-      returning id`;
+    const updated = title
+      ? await tx`
+          update studies set title = ${title}, draft_definition = ${tx.json(def as never)}, updated_at = now()
+          where id = ${studyId} and org_id = ${session.orgId}
+            and status in ('draft','review','live','paused')
+          returning id`
+      : await tx`
+          update studies set draft_definition = ${tx.json(def as never)}, updated_at = now()
+          where id = ${studyId} and org_id = ${session.orgId}
+            and status in ('draft','review','live','paused')
+          returning id`;
     if (updated.length !== 1) throw new Error("Studiet blev ikke fundet eller kan ikke redigeres.");
   });
   revalidatePath(`/studies/${studyId}`);
