@@ -1,5 +1,5 @@
 import { can, segmentDefinition } from "@ok/domain";
-import { Card, KpiTile, LinkButton, PageHeader } from "@/components/ui";
+import { Badge, Card, KpiTile, LinkButton, PageHeader } from "@/components/ui";
 import { requireSession } from "@/lib/auth";
 import { withUser } from "@/lib/db";
 import { listPanelists } from "@/lib/data/panel";
@@ -73,6 +73,15 @@ export default async function PanelPage({
         <KpiTile label="Åbningsrate · 30 dage" value={openRate === null ? "—" : `${openRate} %`} hint={`${data.activity.sent30} sendt, ${data.activity.responded30} besvarede`} />
       </div>
 
+      {data.tags.length > 0 && (
+        <Card>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="mr-1 text-sm font-semibold text-heading">Tags i panel</span>
+            {data.tags.slice(0, 24).map((tag) => <Badge key={tag} tone="blue">{tag}</Badge>)}
+            {data.tags.length > 24 && <span className="text-xs text-muted">+{data.tags.length - 24} flere</span>}
+          </div>
+        </Card>
+      )}
       <Card>
         <FilterBar tags={data.tags} segments={data.segments.map((s) => ({ id: s.id as string, name: s.name as string }))} current={sp} />
         <div className="mt-3">

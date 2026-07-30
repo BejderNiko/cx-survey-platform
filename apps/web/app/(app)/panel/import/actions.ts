@@ -32,6 +32,7 @@ const DEFAULT_COLUMN_MAP: Record<string, string> = {
   country: "country", land: "country",
   customer_status: "customer_status", status: "customer_status",
   recruitment_source: "recruitment_source", source: "recruitment_source",
+  tags: "tags", tag: "tags", labels: "tags",
 };
 
 function normalizeColumn(column: string): string {
