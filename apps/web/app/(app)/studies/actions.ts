@@ -17,6 +17,7 @@ import { deleteStimulusObjectWithRetry } from "@/lib/stimulus-storage";
 const BLANK_SURVEY: InstrumentDefinition = {
   languages: ["da"],
   defaultLanguage: "da",
+  participantDevice: "any",
   blocks: [{ id: "b1", questions: [] }],
   messages: {},
 };

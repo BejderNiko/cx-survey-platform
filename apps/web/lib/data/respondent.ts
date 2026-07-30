@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import {
   evaluateRules,
   instrumentDefinition,
+  participantDeviceAllows,
   validateSubmission,
   type InstrumentDefinition,
 } from "@ok/domain";
@@ -94,14 +95,14 @@ export async function getInvitationSurvey(token: string): Promise<PublicSurvey |
 export async function startResponse(input: {
   token: string;
   language: string;
-  viewport: string;
+  viewport: "desktop" | "mobile";
 }): Promise<{ responseId: string } | { error: string }> {
   if (input.token.startsWith("inv_")) {
     return adminSql.begin(async (tx) => {
       const [survey] = await tx`
         select i.id as invitation_id, i.panelist_id, i.status as invitation_status,
                d.id as distribution_id, d.org_id, s.id as study_id, s.status as study_status,
-               v.id as version_id
+               v.id as version_id, v.definition
         from invitations i
         join distributions d on d.id = i.distribution_id
         join studies s on s.id = d.study_id
@@ -112,6 +113,10 @@ export async function startResponse(input: {
       if (!survey) return { error: "unknown_token" };
       if (survey.study_status !== "live") return { error: "closed" };
       if (survey.invitation_status === "completed") return { error: "already_completed" };
+      const definition = instrumentDefinition.parse(survey.definition);
+      if (!participantDeviceAllows(definition.participantDevice, input.viewport)) {
+        return { error: "device_not_allowed" };
+      }
 
       const [existing] = await tx`
         select id from responses
@@ -136,6 +141,9 @@ export async function startResponse(input: {
   const survey = await getPublicSurvey(input.token);
   if (!survey) return { error: "unknown_token" };
   if (survey.studyStatus !== "live") return { error: "closed" };
+  if (!participantDeviceAllows(survey.definition.participantDevice, input.viewport)) {
+    return { error: "device_not_allowed" };
+  }
 
   const respondentKey = "r_" + randomBytes(9).toString("base64url");
   const [response] = await adminSql`

@@ -5,7 +5,7 @@ import { clientKey, rateLimit } from "@/lib/rate-limit";
 const bodySchema = z.object({
   token: z.string().min(4).max(120),
   language: z.enum(["da", "en"]).default("da"),
-  viewport: z.string().max(20).default("desktop"),
+  viewport: z.enum(["desktop", "mobile"]),
 });
 
 export async function POST(request: Request) {

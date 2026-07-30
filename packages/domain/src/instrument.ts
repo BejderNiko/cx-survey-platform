@@ -10,6 +10,14 @@ import { z } from "zod";
 export const LOCALES = ["da", "en"] as const;
 export type Locale = (typeof LOCALES)[number];
 
+export const PARTICIPANT_DEVICES = ["any", "desktop", "mobile"] as const;
+export type ParticipantDevice = (typeof PARTICIPANT_DEVICES)[number];
+
+/** A client-reported viewport is a product rule, not a security boundary. */
+export function participantDeviceAllows(required: ParticipantDevice, viewport: "desktop" | "mobile"): boolean {
+  return required === "any" || required === viewport;
+}
+
 export const localizedText = z.object({
   da: z.string().optional(),
   en: z.string().optional(),
@@ -125,6 +133,7 @@ export const instrumentMessages = z.object({
 export const instrumentDefinition = z.object({
   languages: z.array(z.enum(LOCALES)).min(1),
   defaultLanguage: z.enum(LOCALES),
+  participantDevice: z.enum(PARTICIPANT_DEVICES).default("any"),
   blocks: z.array(block),
   messages: instrumentMessages.default({}),
   contextStimulus: stimulusAsset.optional(),
