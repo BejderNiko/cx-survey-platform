@@ -71,7 +71,8 @@ export function PanelFilterPanel({
   const [showAllMessages, setShowAllMessages] = useState(false);
   const [fieldQuery, setFieldQuery] = useState("");
   const [pending, startTransition] = useTransition();
-  const firstFilterRender = useRef(true);
+  const filterSignature = useMemo(() => serializeFilterGroups(groups), [groups]);
+  const lastAutoAppliedSignature = useRef(filterSignature);
 
   function addGroup(filterField: FilterField) {
     const values = filterField.key === "age" ? ["18", "65"] : [];
@@ -113,16 +114,13 @@ export function PanelFilterPanel({
   }, [currentSearch, groups, searchParams]);
 
   useEffect(() => {
-    if (firstFilterRender.current) {
-      firstFilterRender.current = false;
-      return;
-    }
-    if (!panelUrl) return;
+    if (!panelUrl || lastAutoAppliedSignature.current === filterSignature) return;
+    lastAutoAppliedSignature.current = filterSignature;
     const timer = window.setTimeout(() => {
       startTransition(() => router.replace(panelUrl, { scroll: false }));
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [panelUrl, router]);
+  }, [filterSignature, panelUrl, router]);
 
   function applyFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
