@@ -30,6 +30,10 @@ beforeAll(async () => {
     insert into custom_fields (org_id, key, label, field_type, options)
     values (${orgId}, 'uddannelse', 'Uddannelse', 'select', ${admin.json(["University", "Trade"])})
     returning id`;
+  const [car] = await admin`
+    insert into custom_fields (org_id, key, label, field_type)
+    values (${orgId}, 'bil', 'Bil', 'text')
+    returning id`;
   const [vip] = await admin`insert into tags (org_id, name) values (${orgId}, 'vip') returning id`;
   const [newTag] = await admin`insert into tags (org_id, name) values (${orgId}, 'new') returning id`;
   const year = new Date().getFullYear();
@@ -50,7 +54,10 @@ beforeAll(async () => {
     values
       (${alpha}, ${education.id}, ${orgId}, ${admin.json("University")}),
       (${beta}, ${education.id}, ${orgId}, ${admin.json("Trade")}),
-      (${gamma}, ${education.id}, ${orgId}, ${admin.json("University")})`;
+      (${gamma}, ${education.id}, ${orgId}, ${admin.json("University")}),
+      (${alpha}, ${car.id}, ${orgId}, ${admin.json("Elbil,Benzin- eller dieselbil")}),
+      (${beta}, ${car.id}, ${orgId}, ${admin.json("Hybridbil")}),
+      (${gamma}, ${car.id}, ${orgId}, ${admin.json("Ingen bil")})`;
   await admin`
     insert into panelist_tags (panelist_id, tag_id, org_id)
     values
@@ -97,6 +104,15 @@ describe("panel filter SQL", () => {
     expect(all.rows[0].first_name).toBe("Alpha");
     expect(none.total).toBe(1);
     expect(none.rows[0].first_name).toBe("Gamma");
+  });
+
+  it("matches individual choices inside imported multi-select text", async () => {
+    const any = await asUser((tx) => listPanelists(tx, { filters: [{ field: "custom", key: "bil", operator: "any", values: ["Elbil", "Hybridbil"] }] }));
+    const all = await asUser((tx) => listPanelists(tx, { filters: [{ field: "custom", key: "bil", operator: "all", values: ["Elbil", "Benzin- eller dieselbil"] }] }));
+    const none = await asUser((tx) => listPanelists(tx, { filters: [{ field: "custom", key: "bil", operator: "none", values: ["Elbil"] }] }));
+    expect(any.rows.map((row) => row.first_name).sort()).toEqual(["Alpha", "Beta"]);
+    expect(all.rows.map((row) => row.first_name)).toEqual(["Alpha"]);
+    expect(none.rows.map((row) => row.first_name).sort()).toEqual(["Beta", "Gamma"]);
   });
 
   it("filters approximate age from birth year", async () => {

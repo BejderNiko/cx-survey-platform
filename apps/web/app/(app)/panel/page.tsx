@@ -8,6 +8,7 @@ import {
   listPanelistIds,
   listPanelists,
   MAX_AUDIENCE_IDS,
+  panelFilterOptionValues,
   parsePanelFilters,
   type PanelFilterGroup,
 } from "@/lib/data/panel";
@@ -25,14 +26,8 @@ const DEFAULT_OPTIONS: Record<string, string[]> = {
 function asClientFilters(filters: PanelFilterGroup[]): ClientFilterGroup[] {
   return filters.map((filter, index) => ({ ...filter, id: "server-group-" + String(index) }));
 }
-function stringValues(values: unknown): string[] {
-  if (!Array.isArray(values)) return [];
-  return values.filter((value) => ["string", "number", "boolean"].includes(typeof value))
-    .map(String).map((value) => value.trim()).filter(Boolean);
-}
 function optionList(values: unknown, fallback: string[] = [], observed: string[] = []) {
-  return [...new Set([...fallback, ...stringValues(values), ...observed])]
-    .sort((left, right) => left.localeCompare(right, "da", { numeric: true }))
+  return panelFilterOptionValues(fallback, values, observed).sort((left, right) => left.localeCompare(right, "da", { numeric: true }))
     .map((value) => ({ value, label: value }));
 }
 function normalizeFieldName(value: unknown): string {

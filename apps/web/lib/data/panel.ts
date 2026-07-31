@@ -23,6 +23,28 @@ const PANEL_FILTER_FIELD_SET = new Set<string>(PANEL_FILTER_FIELDS);
 const PANEL_FILTER_OPERATORS = new Set(["any", "all", "none"]);
 
 /**
+ * Imported multi-select answers currently arrive as comma/semicolon-delimited
+ * text. Normalize them into stable individual filter choices and deduplicate
+ * case-insensitively while preserving the first display spelling.
+ */
+export function panelFilterOptionValues(...sources: unknown[]): string[] {
+  const unique = new Map<string, string>();
+  for (const source of sources) {
+    const values = Array.isArray(source) ? source : [source];
+    for (const value of values) {
+      if (!["string", "number", "boolean"].includes(typeof value)) continue;
+      for (const part of String(value).split(/[;,]/u)) {
+        const option = part.trim();
+        if (!option) continue;
+        const key = option.normalize("NFC").toLocaleLowerCase("da");
+        if (!unique.has(key)) unique.set(key, option);
+      }
+    }
+  }
+  return [...unique.values()];
+}
+
+/**
  * Parse the URL representation shared by the Panel page and audience flows.
  * Invalid groups are rejected instead of reaching SQL with ambiguous values.
  */
@@ -139,7 +161,19 @@ function panelFilterCondition(tx: Tx, group: PanelFilterGroup, value: string) {
   if (group.field === "customer_status") return tx`p.customer_status = ${value}`;
   const key = group.field === "custom" ? group.key ?? "" : group.field;
   if (!key) return tx`false`;
-  return tx`exists (select 1 from panelist_attributes pa join custom_fields cf on cf.id = pa.field_id where pa.panelist_id = p.id and cf.org_id = p.org_id and cf.key = ${key} and pa.value @> ${tx.json(value as never)})`;
+  return tx`exists (
+    select 1
+    from panelist_attributes pa
+    join custom_fields cf on cf.id = pa.field_id
+    cross join lateral jsonb_array_elements_text(
+      case when jsonb_typeof(pa.value) = 'array' then pa.value else jsonb_build_array(pa.value) end
+    ) stored(raw_value)
+    cross join lateral unnest(string_to_array(replace(stored.raw_value, ';', ','), ',')) token(item)
+    where pa.panelist_id = p.id
+      and cf.org_id = p.org_id
+      and cf.key = ${key}
+      and btrim(token.item) = ${value}
+  )`;
 }
 function panelFilterConditions(tx: Tx, filters: PanelFilterGroup[]) {
   const conditions = [];

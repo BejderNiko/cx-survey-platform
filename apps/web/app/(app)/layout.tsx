@@ -33,7 +33,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen">
-      <nav aria-label="Primær" className="hidden w-60 shrink-0 flex-col border-r border-line bg-surface md:flex">
+      <nav aria-label="Primær" className="sticky top-0 hidden h-screen w-60 shrink-0 self-start flex-col overflow-y-auto border-r border-line bg-surface md:flex">
         <div className="px-5 pb-4 pt-5">
           <div className="font-display text-xl tracking-tight text-heading">
             OK<span className="text-accent"> · CX</span>

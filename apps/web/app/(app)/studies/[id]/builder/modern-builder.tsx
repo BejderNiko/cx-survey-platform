@@ -254,7 +254,7 @@ export function Builder({
   }
 
   return (
-    <div className="-m-4 min-h-[calc(100vh-3.5rem)] bg-[#f4f6f7] md:-m-6">
+    <div className="-m-4 min-h-[calc(100vh-3.5rem)] bg-background md:-m-6">
       <header className="sticky top-0 z-30 flex min-h-16 flex-wrap items-center gap-3 border-b border-[#dfe3e6] bg-white/95 px-4 py-3 shadow-[0_1px_0_rgba(15,23,42,0.03)] backdrop-blur md:px-6">
         <Link href={`/studies/${studyId}`} className="inline-flex h-9 items-center gap-2 rounded-lg px-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-950">
           <Icon name="arrow-left" />
@@ -368,8 +368,8 @@ export function Builder({
 
 function BuilderSidebar({ definition, locale }: { definition: InstrumentDefinition; locale: Locale }) {
   return (
-    <aside className="hidden w-60 shrink-0 border-r border-[#d9dee2] bg-[#f8fafb] lg:block">
-      <div className="sticky top-16 max-h-[calc(100vh-4rem)] overflow-y-auto px-3 py-5">
+    <aside className="sticky top-16 hidden h-[calc(100vh-4rem)] w-60 shrink-0 self-start overflow-y-auto border-r border-[#d9dee2] bg-background lg:block">
+      <div className="px-3 py-5">
         <p className="px-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Setup</p>
         <a href="#study-details" className="mt-2 flex items-center gap-2 rounded-lg bg-slate-200/70 px-3 py-2.5 text-sm font-semibold text-slate-900">
           <Icon name="details" /> Test details
@@ -1037,13 +1037,23 @@ function DisplayLogicEditor({
 }) {
   return (
     <div className={cn("rounded-xl border border-cyan-200 bg-cyan-50/60 p-3", noun === "section" ? "mb-4" : "mt-3")}>
-      {conditions.length > 1 && <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><span className="text-xs font-medium text-slate-600">Kombinér betingelser med</span><div className="inline-flex rounded-lg border border-cyan-200 bg-white p-0.5" role="group" aria-label="Combine display conditions"><button type="button" onClick={() => onModeChange("all")} className={cn("rounded-md px-3 py-1.5 text-xs font-semibold", mode === "all" ? "bg-cyan-700 text-white" : "text-slate-600 hover:bg-cyan-50")}>Og</button><button type="button" onClick={() => onModeChange("any")} className={cn("rounded-md px-3 py-1.5 text-xs font-semibold", mode === "any" ? "bg-cyan-700 text-white" : "text-slate-600 hover:bg-cyan-50")}>Eller</button></div></div>}
-      <div className="space-y-3">
+      <div>
         {conditions.map((condition, index) => {
           const target = candidates.find((candidate) => candidate.code === condition.questionCode);
           const operator = conditionOperatorFor(target);
           return (
-            <div key={index} className="rounded-lg border border-slate-200 bg-white p-3">
+            <div key={index}>
+              {index > 0 && (
+                <div className="flex items-center gap-3 py-2.5" role="group" aria-label={`Combine condition ${index} and ${index + 1}`}>
+                  <span className="h-px flex-1 bg-cyan-200" aria-hidden />
+                  <div className="inline-flex rounded-lg border border-cyan-200 bg-white p-0.5">
+                    <button type="button" onClick={() => onModeChange("all")} className={cn("rounded-md px-3 py-1.5 text-xs font-semibold", mode === "all" ? "bg-cyan-700 text-white" : "text-slate-600 hover:bg-cyan-50")}>Og</button>
+                    <button type="button" onClick={() => onModeChange("any")} className={cn("rounded-md px-3 py-1.5 text-xs font-semibold", mode === "any" ? "bg-cyan-700 text-white" : "text-slate-600 hover:bg-cyan-50")}>Eller</button>
+                  </div>
+                  <span className="h-px flex-1 bg-cyan-200" aria-hidden />
+                </div>
+              )}
+              <div className="rounded-lg border border-slate-200 bg-white p-3">
               <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
                 <Select
                   aria-label={`Show or hide ${noun}`}
@@ -1103,6 +1113,7 @@ function DisplayLogicEditor({
               {isIncompleteLogicCondition(condition) && (
                 <p className="mt-2 text-xs font-medium text-orange-700">{INCOMPLETE_LOGIC_CONDITION_MESSAGE}</p>
               )}
+              </div>
             </div>
           );
         })}
