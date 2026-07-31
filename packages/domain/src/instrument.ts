@@ -65,6 +65,9 @@ export const condition = z.object({
 });
 export type Condition = z.infer<typeof condition>;
 
+export const displayConditionMode = z.enum(["all", "any"]);
+export type DisplayConditionMode = z.infer<typeof displayConditionMode>;
+
 export const branchRule = z.object({
   id: z.string(),
   when: z.array(condition).min(1), // all conditions must hold (AND)
@@ -111,6 +114,7 @@ export const question = z.object({
   randomizeStimuli: z.boolean().optional(),
   contextOverride: stimulusAsset.nullable().optional(), // reserved question-level override; null hides study context
   visibleIf: z.array(condition).optional(),      // display conditions (AND)
+  visibleIfMode: displayConditionMode.optional(), // omitted keeps legacy AND behavior
   branches: z.array(branchRule).optional(),      // evaluated after answering
   isScreener: z.boolean().optional(),            // disqualifying screener question
 });
@@ -121,6 +125,7 @@ export const block = z.object({
   title: localizedText.optional(),
   hidden: z.boolean().optional(),
   visibleIf: z.array(condition).optional(),
+  visibleIfMode: displayConditionMode.optional(),
   questions: z.array(question),
   contextOverride: stimulusAsset.nullable().optional(), // reserved block-level override; undefined inherits
 });

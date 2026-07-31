@@ -9,6 +9,7 @@ import {
   lt,
   validateInstrument,
   type Condition,
+  type DisplayConditionMode,
   type InstrumentDefinition,
   type Locale,
   type Question,
@@ -17,7 +18,6 @@ import { Badge, Button, Input, Label, Select, Textarea, cn } from "@/components/
 import { SurveyRenderer } from "@/components/survey/renderer";
 import { updateDraft } from "../../actions";
 
-const CONDITION_OPS = ["eq", "ne", "lt", "lte", "gt", "gte", "answered"] as const;
 const OPTION_TYPES = ["single_choice", "multiple_choice", "dropdown", "likert", "ranking"];
 
 let uid = 0;
@@ -147,13 +147,22 @@ export function Builder({
 }) {
   const [definition, setDefinition] = useState(initialDefinition);
   const [studyTitle, setStudyTitle] = useState(initialTitle);
-  const [editingLocale, setEditingLocale] = useState<Locale>(initialDefinition.defaultLanguage);
+  const editingLocale: Locale = initialDefinition.defaultLanguage;
   const [dirty, setDirty] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile" | null>(null);
   const [pending, startTransition] = useTransition();
 
   const questions = useMemo(() => definition.blocks.flatMap((block) => block.questions), [definition]);
+  const questionNumbers = useMemo(() => {
+    const numbers = new Map<string, string>();
+    definition.blocks.forEach((block, blockIndex) => {
+      block.questions.forEach((question, questionIndex) => {
+        numbers.set(question.code, String(blockIndex + 1) + "." + String(questionIndex + 1));
+      });
+    });
+    return numbers;
+  }, [definition.blocks]);
   const problems = useMemo(() => validateInstrument(definition), [definition]);
   const incompleteLogicCount = useMemo(() => displayLogicWarningCount(definition), [definition]);
 
@@ -273,16 +282,6 @@ export function Builder({
         <Button variant="secondary" onClick={() => setPreviewMode(previewMode ? null : "desktop")}>
           <Icon name="eye" /> {previewMode ? "Close preview" : "Preview"}
         </Button>
-        <Link
-          href={`/studies/${studyId}/builder?mode=legacy`}
-          className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-950"
-          onClick={(event) => {
-            if (dirty && !window.confirm("Open the legacy editor and discard unsaved changes?")) event.preventDefault();
-          }}
-          title="Open legacy builder fallback"
-        >
-          Legacy editor
-        </Link>
         <Button
           onClick={save}
           disabled={pending || !dirty || !studyTitle.trim() || incompleteLogicCount > 0}
@@ -308,9 +307,7 @@ export function Builder({
               <StudyDetails
                 title={studyTitle}
                 definition={definition}
-                editingLocale={editingLocale}
                 onTitleChange={(value) => { setStudyTitle(value); setDirty(true); setSaveMessage(null); }}
-                onLocaleChange={setEditingLocale}
                 mutate={mutate}
               />
               <MessageSection
@@ -330,6 +327,7 @@ export function Builder({
                   blockIndex={blockIndex}
                   locale={editingLocale}
                   allQuestions={questions}
+                  questionNumbers={questionNumbers}
                   priorQuestions={definition.blocks.slice(0, blockIndex).flatMap((current) => current.questions)}
                   onTitleChange={(title) => mutate((draft) => {
                     const current = draft.blocks.find((item) => item.id === block.id);
@@ -479,63 +477,29 @@ function ValidationNotice({ problems }: { problems: string[] }) {
 }
 
 function StudyDetails({
-  title, definition, editingLocale, onTitleChange, onLocaleChange, mutate,
+  title, definition, onTitleChange, mutate,
 }: {
   title: string;
   definition: InstrumentDefinition;
-  editingLocale: Locale;
   onTitleChange: (value: string) => void;
-  onLocaleChange: (locale: Locale) => void;
   mutate: (change: (draft: InstrumentDefinition) => void) => void;
 }) {
   return (
     <section id="study-details" className="scroll-mt-24">
       <h1 className="mb-4 font-serif text-2xl font-semibold tracking-tight text-slate-950">Study details</h1>
-      <div className="rounded-2xl border border-[#dfe3e6] bg-white p-5 shadow-[0_2px_3px_rgba(15,23,42,0.05)] sm:p-6">
-        <div className="space-y-5">
-          <label className="block">
-            <span className="mb-1.5 flex items-center gap-1 text-xs font-semibold text-slate-700">Study name <Icon name="info" size={12} className="text-slate-400" /></span>
-            <Input value={title} onChange={(event) => onTitleChange(event.target.value)} placeholder="Name your study" className="h-10" />
-          </label>
-          <div className="grid gap-5 sm:grid-cols-3">
-            <label className="block">
-              <span className="mb-1.5 flex items-center gap-1 text-xs font-semibold text-slate-700">Default language <Icon name="info" size={12} className="text-slate-400" /></span>
-              <Select
-                className="h-10 w-full"
-                value={definition.defaultLanguage}
-                onChange={(event) => {
-                  const locale = event.target.value as Locale;
-                  mutate((draft) => { draft.defaultLanguage = locale; });
-                  onLocaleChange(locale);
-                }}
-              >
-                <option value="da">Danish - dansk</option>
-                <option value="en">English</option>
-              </Select>
-            </label>
-            <label className="block">
-              <span className="mb-1.5 block text-xs font-semibold text-slate-700">Content language</span>
-              <Select className="h-10 w-full" value={editingLocale} onChange={(event) => onLocaleChange(event.target.value as Locale)}>
-                {definition.languages.map((locale) => <option key={locale} value={locale}>{locale === "da" ? "Danish content" : "English content"}</option>)}
-              </Select>
-            </label>
-            <label className="block">
-              <span className="mb-1.5 block text-xs font-semibold text-slate-700">Participant device</span>
-              <Select
-                className="h-10 w-full"
-                value={definition.participantDevice}
-                aria-label="Participant device"
-                onChange={(event) => mutate((draft) => {
-                  draft.participantDevice = event.target.value as InstrumentDefinition["participantDevice"];
-                })}
-              >
-                <option value="any">Any device</option>
-                <option value="desktop">Desktop</option>
-                <option value="mobile">Mobile</option>
-              </Select>
-            </label>
-          </div>
-        </div>
+      <div className="grid gap-5 rounded-2xl border border-[#dfe3e6] bg-white p-5 shadow-[0_2px_3px_rgba(15,23,42,0.05)] sm:grid-cols-[minmax(0,1fr)_220px] sm:p-6">
+        <label className="block">
+          <span className="mb-1.5 flex items-center gap-1 text-xs font-semibold text-slate-700">Study name <Icon name="info" size={12} className="text-slate-400" /></span>
+          <Input value={title} onChange={(event) => onTitleChange(event.target.value)} placeholder="Name your study" className="h-10" />
+        </label>
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-semibold text-slate-700">Participant device</span>
+          <Select className="h-10 w-full" value={definition.participantDevice} aria-label="Participant device" onChange={(event) => mutate((draft) => {
+            draft.participantDevice = event.target.value as InstrumentDefinition["participantDevice"];
+          })}>
+            <option value="any">Any device</option><option value="desktop">Desktop</option><option value="mobile">Mobile</option>
+          </Select>
+        </label>
       </div>
     </section>
   );
@@ -613,6 +577,7 @@ function StudySection({
   blockIndex,
   locale,
   allQuestions,
+  questionNumbers,
   priorQuestions,
   onTitleChange,
   onBlockChange,
@@ -627,6 +592,7 @@ function StudySection({
   blockIndex: number;
   locale: Locale;
   allQuestions: Question[];
+  questionNumbers: ReadonlyMap<string, string>;
   priorQuestions: Question[];
   onTitleChange: (title: { da?: string; en?: string }) => void;
   onBlockChange: (patch: Partial<InstrumentDefinition["blocks"][number]>) => void;
@@ -693,8 +659,11 @@ function StudySection({
           noun="section"
           locale={locale}
           conditions={block.visibleIf ?? []}
+          mode={block.visibleIfMode ?? "all"}
+          questionNumbers={questionNumbers}
           candidates={priorQuestions}
           onChange={(visibleIf) => onBlockChange({ visibleIf })}
+          onModeChange={(visibleIfMode) => onBlockChange({ visibleIfMode })}
         />
       )}
       <div className={cn("rounded-2xl border p-4 shadow-[0_2px_3px_rgba(15,23,42,0.05)] sm:p-5", block.hidden ? "border-dashed border-slate-300 bg-slate-50/80" : "border-[#d9dee2] bg-white")}>
@@ -706,6 +675,7 @@ function StudySection({
               number={`${blockIndex + 1}.${questionIndex + 1}`}
               locale={locale}
               allQuestions={allQuestions}
+              questionNumbers={questionNumbers}
               onChange={(patch) => onQuestionChange(question.code, patch)}
               onMoveUp={() => onMoveQuestion(questionIndex, -1)}
               onMoveDown={() => onMoveQuestion(questionIndex, 1)}
@@ -737,12 +707,13 @@ function StudySection({
 }
 
 function QuestionCard({
-  question, number, locale, allQuestions, onChange, onMoveUp, onMoveDown, onRemove, canMoveUp, canMoveDown,
+  question, number, locale, allQuestions, questionNumbers, onChange, onMoveUp, onMoveDown, onRemove, canMoveUp, canMoveDown,
 }: {
   question: Question;
   number: string;
   locale: Locale;
   allQuestions: Question[];
+  questionNumbers: ReadonlyMap<string, string>;
   onChange: (patch: Partial<Question>) => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
@@ -752,8 +723,7 @@ function QuestionCard({
 }) {
   const index = allQuestions.findIndex((item) => item.code === question.code);
   const priorQuestions = allQuestions.slice(0, index);
-  const laterQuestions = allQuestions.slice(index + 1);
-  const hasLogic = Boolean(question.visibleIf?.length || question.branches?.length);
+  const hasLogic = Boolean(question.visibleIf?.length);
   const [logicOpen, setLogicOpen] = useState(hasLogic);
   return (
     <article id={`question-${question.code}`} className={cn("scroll-mt-24 rounded-xl border p-4 transition-shadow focus-within:border-slate-400 focus-within:shadow-[0_4px_18px_rgba(15,23,42,0.08)]", question.hidden ? "border-dashed border-slate-300 bg-slate-50/80" : "border-[#d8dde1] bg-white")}>
@@ -774,6 +744,7 @@ function QuestionCard({
               required: question.required,
               hidden: question.hidden,
               visibleIf: question.visibleIf,
+              visibleIfMode: question.visibleIfMode,
               branches: question.branches,
             });
           }}
@@ -786,7 +757,7 @@ function QuestionCard({
           required={question.required}
           hidden={Boolean(question.hidden)}
           hasLogic={hasLogic}
-          logicRuleCount={(question.visibleIf?.length ?? 0) + (question.branches?.length ?? 0)}
+          logicRuleCount={question.visibleIf?.length ?? 0}
           logicOpen={logicOpen}
           onRequiredChange={(required) => onChange({ required })}
           onLogicToggle={() => {
@@ -806,8 +777,11 @@ function QuestionCard({
           noun="question"
           locale={locale}
           conditions={question.visibleIf ?? []}
+          mode={question.visibleIfMode ?? "all"}
+          questionNumbers={questionNumbers}
           candidates={priorQuestions}
           onChange={(visibleIf) => onChange({ visibleIf })}
+          onModeChange={(visibleIfMode) => onChange({ visibleIfMode })}
         />
       )}
       <div className="mt-4">
@@ -817,7 +791,6 @@ function QuestionCard({
           <QuestionBody question={question} locale={locale} onChange={onChange} />
         )}
       </div>
-      <LogicEditor open={logicOpen} question={question} laterQuestions={laterQuestions} onChange={onChange} />
     </article>
   );
 }
@@ -844,7 +817,7 @@ function QuestionHeaderToolbar({
 }) {
   return (
     <div className="ml-auto flex min-h-9 flex-wrap items-center justify-end gap-2">
-      <span className="inline-flex h-9 items-center gap-2 rounded-md bg-slate-50 px-2 text-xs text-slate-700">
+      <span className="inline-flex h-9 items-center gap-2 overflow-hidden rounded-md border border-slate-200 bg-slate-50 px-2.5 text-xs text-slate-700">
         Required
         <Toggle checked={required} onChange={onRequiredChange} aria-label={`Question ${number} required`} />
       </span>
@@ -880,23 +853,14 @@ function QuestionHeaderToolbar({
 
 function QuestionBody({ question, locale, onChange }: { question: Question; locale: Locale; onChange: (patch: Partial<Question>) => void }) {
   const meta = QUESTION_META[question.type];
+  const [helpTextOpen, setHelpTextOpen] = useState(() => Object.values(question.helpText ?? {}).some((value) => Boolean(value?.trim())));
   return (
     <div className="space-y-4">
-      <LocalizedField
-        label="Question"
-        hint={meta.hint}
-        locale={locale}
-        value={question.label}
-        onChange={(label) => onChange({ label })}
-        textarea={question.type === "long_text"}
-      />
-      <LocalizedField
-        label="Help text"
-        locale={locale}
-        value={question.helpText ?? {}}
-        onChange={(helpText) => onChange({ helpText })}
-        placeholder="Optional explanation shown below the question"
-      />
+      <LocalizedField label="Question" hint={meta.hint} locale={locale} value={question.label} onChange={(label) => onChange({ label })} textarea={question.type === "long_text"} />
+      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+        <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-800">Help text</p><p className="mt-0.5 text-[11px] text-slate-500">Show an optional explanation below the question.</p></div><Toggle checked={helpTextOpen} onChange={setHelpTextOpen} aria-label="Enable help text" /></div>
+        {helpTextOpen && <div className="mt-3"><LocalizedField label="Help text" locale={locale} value={question.helpText ?? {}} onChange={(helpText) => onChange({ helpText })} placeholder="Optional explanation shown below the question" /></div>}
+      </div>
       {needsOptions(question.type) && <OptionsEditor question={question} locale={locale} onChange={onChange} />}
       {question.type === "rating" && <ScaleEditor question={question} locale={locale} onChange={onChange} />}
       {question.type === "matrix" && <MatrixEditor question={question} locale={locale} onChange={onChange} />}
@@ -1059,75 +1023,21 @@ function MatrixEditor({ question, locale, onChange }: { question: Question; loca
   );
 }
 
-function LogicEditor({
-  open, question, laterQuestions, onChange,
-}: {
-  open: boolean;
-  question: Question;
-  laterQuestions: Question[];
-  onChange: (patch: Partial<Question>) => void;
-}) {
-  if (!open) return null;
-  return (
-    <section className="mt-4 border-t border-slate-200 pt-3" aria-label={`Logic rules for ${question.code}`}>
-      <div className="mb-3 flex items-center gap-2 text-xs font-semibold text-slate-700">
-        <Icon name="logic" size={14} />
-        Logic rules
-        <span className="ml-auto text-[11px] font-normal text-slate-500">Display conditions and answer routing</span>
-      </div>
-      <div className="rounded-lg bg-slate-50 p-3">
-        <div>
-          <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">After answering, jump</p>
-          <div className="space-y-2">
-            {(question.branches ?? []).map((branch, index) => (
-              <div key={branch.id} className="flex flex-wrap items-center gap-2">
-                <Select aria-label="Branch operator" value={branch.when[0]?.op ?? "eq"} onChange={(event) => {
-                  const branches = structuredClone(question.branches ?? []);
-                  branches[index].when = [{ questionCode: question.code, op: event.target.value as typeof CONDITION_OPS[number], value: branch.when[0]?.value }];
-                  onChange({ branches });
-                }} className="h-8 text-xs">
-                  {CONDITION_OPS.map((operator) => <option key={operator} value={operator}>{operator}</option>)}
-                </Select>
-                <Input aria-label="Branch value" value={String(branch.when[0]?.value ?? "")} onChange={(event) => {
-                  const branches = structuredClone(question.branches ?? []);
-                  const raw = event.target.value;
-                  const numeric = Number(raw);
-                  branches[index].when = [{ questionCode: question.code, op: branch.when[0]?.op ?? "eq", value: raw !== "" && !Number.isNaN(numeric) ? numeric : raw }];
-                  onChange({ branches });
-                }} className="h-8 min-w-24 flex-1 text-xs" />
-                <Select aria-label="Branch target" value={branch.goTo} onChange={(event) => {
-                  const branches = structuredClone(question.branches ?? []);
-                  branches[index].goTo = event.target.value;
-                  onChange({ branches });
-                }} className="h-8 min-w-32 flex-1 text-xs">
-                  {laterQuestions.map((candidate) => <option key={candidate.code} value={candidate.code}>{candidate.code}</option>)}
-                  <option value="END">Thank you screen</option>
-                  <option value="DISQUALIFY">Disqualify</option>
-                </Select>
-                <button type="button" aria-label="Delete branch" onClick={() => onChange({ branches: (question.branches ?? []).filter((_, itemIndex) => itemIndex !== index) })} className="text-slate-400 hover:text-red-700"><Icon name="trash" size={14} /></button>
-              </div>
-            ))}
-          </div>
-          <Button size="sm" variant="secondary" className="mt-2" onClick={() => onChange({
-            branches: [...(question.branches ?? []), { id: nextId("branch"), when: [{ questionCode: question.code, op: "eq", value: "" }], goTo: "END" }],
-          })}>Add routing rule</Button>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function DisplayLogicEditor({
-  noun, locale, conditions, candidates, onChange,
+  noun, locale, conditions, candidates, questionNumbers, mode, onChange, onModeChange,
 }: {
   noun: "question" | "section";
   locale: Locale;
   conditions: Condition[];
   candidates: Question[];
+  questionNumbers: ReadonlyMap<string, string>;
+  mode: DisplayConditionMode;
   onChange: (conditions: Condition[]) => void;
+  onModeChange: (mode: DisplayConditionMode) => void;
 }) {
   return (
-    <div className={cn(noun === "section" ? "mb-4 rounded-xl border border-cyan-200 bg-cyan-50/60 p-3" : "mt-3")}>
+    <div className={cn("rounded-xl border border-cyan-200 bg-cyan-50/60 p-3", noun === "section" ? "mb-4" : "mt-3")}>
+      {conditions.length > 1 && <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><span className="text-xs font-medium text-slate-600">Kombinér betingelser med</span><div className="inline-flex rounded-lg border border-cyan-200 bg-white p-0.5" role="group" aria-label="Combine display conditions"><button type="button" onClick={() => onModeChange("all")} className={cn("rounded-md px-3 py-1.5 text-xs font-semibold", mode === "all" ? "bg-cyan-700 text-white" : "text-slate-600 hover:bg-cyan-50")}>Og</button><button type="button" onClick={() => onModeChange("any")} className={cn("rounded-md px-3 py-1.5 text-xs font-semibold", mode === "any" ? "bg-cyan-700 text-white" : "text-slate-600 hover:bg-cyan-50")}>Eller</button></div></div>}
       <div className="space-y-3">
         {conditions.map((condition, index) => {
           const target = candidates.find((candidate) => candidate.code === condition.questionCode);
@@ -1165,7 +1075,7 @@ function DisplayLogicEditor({
                   <option value="">Select a previous question</option>
                   {candidates.map((candidate) => (
                     <option key={candidate.code} value={candidate.code}>
-                      {lt(candidate.label, locale) || candidate.code}
+                      {questionNumbers.get(candidate.code) ?? "?"} {lt(candidate.label, locale) || candidate.code}
                     </option>
                   ))}
                 </Select>
@@ -1311,7 +1221,7 @@ function Toggle(props: { checked: boolean; onChange?: (checked: boolean) => void
       onClick={props.readOnly ? undefined : () => props.onChange?.(!props.checked)}
       className={cn("relative h-5 w-9 shrink-0 rounded-full transition-colors", props.checked ? "bg-[#07828a]" : "bg-slate-300", props.readOnly ? "cursor-default" : "cursor-pointer")}
     >
-      <span className={cn("absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform", props.checked ? "translate-x-[18px]" : "translate-x-0.5")} />
+      <span className={cn("absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform", props.checked ? "translate-x-4" : "translate-x-0")} />
     </button>
   );
 }

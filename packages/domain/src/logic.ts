@@ -1,5 +1,6 @@
 import {
   type Condition,
+  type DisplayConditionMode,
   type Block,
   type InstrumentDefinition,
   type Question,
@@ -62,13 +63,17 @@ export function conditionsHold(conds: Condition[] | undefined, answers: AnswerMa
   return conds.every((c) => evaluateCondition(c, answers));
 }
 
-/** Legacy display conditions are show rules. Hide rules take precedence when matched. */
-export function displayConditionsHold(conds: Condition[] | undefined, answers: AnswerMap): boolean {
+/** Display rules use legacy all-match behavior unless an explicit any-match mode is stored. */
+export function displayConditionsHold(
+  conds: Condition[] | undefined,
+  answers: AnswerMap,
+  mode: DisplayConditionMode = "all",
+): boolean {
   if (!conds || conds.length === 0) return true;
-  const showRules = conds.filter((current) => current.effect !== "hide");
-  const hideRules = conds.filter((current) => current.effect === "hide");
-  return showRules.every((current) => evaluateCondition(current, answers))
-    && hideRules.every((current) => !evaluateCondition(current, answers));
+  const results = conds.map((current) => current.effect === "hide"
+    ? !evaluateCondition(current, answers)
+    : evaluateCondition(current, answers));
+  return mode === "any" ? results.some(Boolean) : results.every(Boolean);
 }
 
 export type FlowStep =
@@ -123,8 +128,8 @@ function firstVisibleFrom(
     const currentBlock = blocksByQuestion.get(q.code);
     if (!q.hidden
       && !currentBlock?.hidden
-      && displayConditionsHold(currentBlock?.visibleIf, answers)
-      && displayConditionsHold(q.visibleIf, answers)) {
+      && displayConditionsHold(currentBlock?.visibleIf, answers, currentBlock?.visibleIfMode)
+      && displayConditionsHold(q.visibleIf, answers, q.visibleIfMode)) {
       return { kind: "question", question: q };
     }
   }

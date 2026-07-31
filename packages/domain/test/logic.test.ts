@@ -153,6 +153,18 @@ describe("survey logic engine", () => {
     expect(visiblePath(def, { screener: "yes", nps_score: 2 })).toContain("detractor_why");
   });
 
+  it("supports any-match display conditions without changing the legacy all-match default", () => {
+    const conditional = structuredClone(def);
+    conditional.blocks[0].questions[3].visibleIf = [
+      { questionCode: "screener", op: "eq", value: "no" },
+      { questionCode: "nps_score", op: "gte", value: 9 },
+    ];
+    expect(visiblePath(conditional, { screener: "yes", nps_score: 10 })).not.toContain("promoter_why");
+
+    conditional.blocks[0].questions[3].visibleIfMode = "any";
+    expect(visiblePath(conditional, { screener: "yes", nps_score: 10 })).toContain("promoter_why");
+  });
+
   it("matches every selected value in a multiple-choice contains condition", () => {
     expect(evaluateCondition(
       { questionCode: "channels", op: "contains", value: ["email", "sms"] },

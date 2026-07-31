@@ -209,7 +209,13 @@ export async function listPanelists(tx: Tx, params: PanelListParams) {
            coalesce((select array_agg(tg.name order by tg.name) from panelist_tags pt
                      join tags tg on tg.id = pt.tag_id where pt.panelist_id = p.id and pt.org_id = p.org_id), '{}') as tags,
            exists (select 1 from consent_records cr where cr.panelist_id = p.id
-                   and cr.purpose = 'survey_contact' and cr.status = 'granted') as has_consent
+                   and cr.purpose = 'survey_contact' and cr.status = 'granted') as has_consent,
+           coalesce((
+             select jsonb_object_agg(cf.key, pa.value)
+             from panelist_attributes pa
+             join custom_fields cf on cf.id = pa.field_id and cf.org_id = p.org_id
+             where pa.panelist_id = p.id and pa.org_id = p.org_id
+           ), '{}'::jsonb) as attributes
     from panelists p
     where ${where}
     order by ${orderBy}
