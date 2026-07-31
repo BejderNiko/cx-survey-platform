@@ -17,6 +17,7 @@ import {
 import { Badge, Button, Input, Label, Select, Textarea, cn } from "@/components/ui";
 import { SurveyRenderer } from "@/components/survey/renderer";
 import { updateDraft } from "../../actions";
+import { StimulusEditor } from "./stimulus-editor";
 
 const OPTION_TYPES = ["single_choice", "multiple_choice", "dropdown", "likert", "ranking"];
 
@@ -255,7 +256,7 @@ export function Builder({
 
   return (
     <div className="-m-4 min-h-[calc(100vh-3.5rem)] bg-background md:-m-6">
-      <header className="sticky top-0 z-30 flex min-h-16 flex-wrap items-center gap-3 border-b border-[#dfe3e6] bg-white/95 px-4 py-3 shadow-[0_1px_0_rgba(15,23,42,0.03)] backdrop-blur md:px-6">
+      <header className="sticky top-0 z-30 flex min-h-16 flex-wrap items-center gap-3 border-b border-[#dfe3e6] bg-transparent px-4 py-3 md:px-6">
         <Link href={`/studies/${studyId}`} className="inline-flex h-9 items-center gap-2 rounded-lg px-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-950">
           <Icon name="arrow-left" />
           Study
@@ -323,6 +324,7 @@ export function Builder({
               {definition.blocks.map((block, blockIndex) => (
                 <StudySection
                   key={block.id}
+                  studyId={studyId}
                   block={block}
                   blockIndex={blockIndex}
                   locale={editingLocale}
@@ -573,6 +575,7 @@ function SectionHeading({ icon, children, actions }: { icon: IconName; children:
 }
 
 function StudySection({
+  studyId,
   block,
   blockIndex,
   locale,
@@ -588,6 +591,7 @@ function StudySection({
   onRemoveSection,
   canRemoveSection,
 }: {
+  studyId: string;
   block: InstrumentDefinition["blocks"][number];
   blockIndex: number;
   locale: Locale;
@@ -664,6 +668,7 @@ function StudySection({
           candidates={priorQuestions}
           onChange={(visibleIf) => onBlockChange({ visibleIf })}
           onModeChange={(visibleIfMode) => onBlockChange({ visibleIfMode })}
+          onDisable={() => { onBlockChange({ visibleIf: undefined, visibleIfMode: undefined }); setLogicOpen(false); }}
         />
       )}
       <div className={cn("rounded-2xl border p-4 shadow-[0_2px_3px_rgba(15,23,42,0.05)] sm:p-5", block.hidden ? "border-dashed border-slate-300 bg-slate-50/80" : "border-[#d9dee2] bg-white")}>
@@ -671,6 +676,7 @@ function StudySection({
           {block.questions.map((question, questionIndex) => (
             <QuestionCard
               key={question.code}
+              studyId={studyId}
               question={question}
               number={`${blockIndex + 1}.${questionIndex + 1}`}
               locale={locale}
@@ -707,8 +713,9 @@ function StudySection({
 }
 
 function QuestionCard({
-  question, number, locale, allQuestions, questionNumbers, onChange, onMoveUp, onMoveDown, onRemove, canMoveUp, canMoveDown,
+  studyId, question, number, locale, allQuestions, questionNumbers, onChange, onMoveUp, onMoveDown, onRemove, canMoveUp, canMoveDown,
 }: {
+  studyId: string;
   question: Question;
   number: string;
   locale: Locale;
@@ -782,11 +789,12 @@ function QuestionCard({
           candidates={priorQuestions}
           onChange={(visibleIf) => onChange({ visibleIf })}
           onModeChange={(visibleIfMode) => onChange({ visibleIfMode })}
+          onDisable={() => { onChange({ visibleIf: undefined, visibleIfMode: undefined }); setLogicOpen(false); }}
         />
       )}
       <div className="mt-4">
         {question.type === "first_click" ? (
-          <DesignQuestionBody question={question} locale={locale} onChange={onChange} />
+          <DesignQuestionBody studyId={studyId} question={question} locale={locale} onChange={onChange} />
         ) : (
           <QuestionBody question={question} locale={locale} onChange={onChange} />
         )}
@@ -868,40 +876,60 @@ function QuestionBody({ question, locale, onChange }: { question: Question; loca
   );
 }
 
-function DesignQuestionBody({ question, locale, onChange }: { question: Question; locale: Locale; onChange: (patch: Partial<Question>) => void }) {
+function DesignQuestionBody({
+  studyId, question, locale, onChange,
+}: {
+  studyId: string;
+  question: Question;
+  locale: Locale;
+  onChange: (patch: Partial<Question>) => void;
+}) {
+  const stimuli = question.stimuli ?? (question.stimulus ? [question.stimulus] : []);
+  const replaceStimulus = (index: number, asset: NonNullable<Question["stimulus"]>) => {
+    const next = [...stimuli];
+    next[index] = asset;
+    onChange({ stimuli: next, stimulus: undefined, imageUrl: undefined });
+  };
+  const removeStimulus = (index: number) => {
+    const next = stimuli.filter((_, itemIndex) => itemIndex !== index);
+    onChange({ stimuli: next.length > 0 ? next : undefined, stimulus: undefined });
+  };
   return (
     <div className="space-y-4">
       <div className="rounded-xl bg-[#f2f8fb] p-4">
-        <div className="flex flex-col gap-4 sm:flex-row">
-          <div className="grid h-40 w-full shrink-0 place-items-center overflow-hidden rounded-lg border border-slate-200 bg-white sm:w-48">
-            {question.imageUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={question.imageUrl} alt="Design stimulus preview" className="max-h-full max-w-full object-contain" />
-            ) : (
-              <div className="text-center text-slate-400">
-                <Icon name="image" size={28} className="mx-auto" />
-                <p className="mt-2 text-xs">No design added</p>
-              </div>
-            )}
-          </div>
-          <div className="min-w-0 flex-1 space-y-3">
-            <div>
-              <p className="text-sm font-semibold">Design stimulus</p>
-              <p className="mt-1 text-xs text-slate-500">Paste an image URL or data URI. Participant first click is recorded.</p>
-            </div>
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold text-slate-700">Image URL</span>
-              <Textarea rows={3} value={question.imageUrl ?? ""} onChange={(event) => onChange({ imageUrl: event.target.value })} placeholder="https://..." />
-            </label>
-          </div>
-        </div>
+        <p className="text-sm font-semibold">Designs</p>
+        <p className="mt-1 text-xs text-slate-500">{"Vedh\u00e6ft 1-8 billeder fra din enhed. Hvert klik gemmes sammen med det valgte design."}</p>
       </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {stimuli.map((stimulus, index) => (
+          <StimulusEditor
+            key={stimulus.id}
+            studyId={studyId}
+            kind="first_click"
+            label={`Design ${index + 1}`}
+            value={stimulus}
+            onChange={(asset) => replaceStimulus(index, asset)}
+            onRemove={() => removeStimulus(index)}
+          />
+        ))}
+        {stimuli.length < 8 && (
+          <StimulusEditor
+            studyId={studyId}
+            kind="first_click"
+            label={`Vedh\u00e6ft design ${stimuli.length + 1}`}
+            value={null}
+            onChange={(asset) => onChange({ stimuli: [...stimuli, asset], stimulus: undefined, imageUrl: undefined })}
+          />
+        )}
+      </div>
+      {question.imageUrl && stimuli.length === 0 && (
+        <p className="text-xs text-slate-500">{"Et \u00e6ldre billedlink findes i kladden. Vedh\u00e6ft et nyt billede for at erstatte det."}</p>
+      )}
       <LocalizedField label="Task instruction" hint="Tell participants what to find or do in the design." locale={locale} value={question.taskText ?? {}} onChange={(taskText) => onChange({ taskText })} />
       <LocalizedField label="Question" locale={locale} value={question.label} onChange={(label) => onChange({ label })} placeholder="Optional follow-up label" />
     </div>
   );
 }
-
 function LocalizedField({
   label, hint, locale, value, onChange, placeholder, textarea = false,
 }: {
@@ -1024,7 +1052,7 @@ function MatrixEditor({ question, locale, onChange }: { question: Question; loca
 }
 
 function DisplayLogicEditor({
-  noun, locale, conditions, candidates, questionNumbers, mode, onChange, onModeChange,
+  noun, locale, conditions, candidates, questionNumbers, mode, onChange, onModeChange, onDisable,
 }: {
   noun: "question" | "section";
   locale: Locale;
@@ -1034,6 +1062,7 @@ function DisplayLogicEditor({
   mode: DisplayConditionMode;
   onChange: (conditions: Condition[]) => void;
   onModeChange: (mode: DisplayConditionMode) => void;
+  onDisable: () => void;
 }) {
   return (
     <div className={cn("rounded-xl border border-cyan-200 bg-cyan-50/60 p-3", noun === "section" ? "mb-4" : "mt-3")}>
@@ -1104,7 +1133,10 @@ function DisplayLogicEditor({
                 <button
                   type="button"
                   aria-label="Delete condition"
-                  onClick={() => onChange(conditions.filter((_, itemIndex) => itemIndex !== index))}
+                  onClick={() => {
+                    const next = conditions.filter((_, itemIndex) => itemIndex !== index);
+                    if (next.length === 0) onDisable(); else onChange(next);
+                  }}
                   className="grid h-9 w-9 place-items-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-700"
                 >
                   <Icon name="trash" size={14} />
@@ -1123,7 +1155,7 @@ function DisplayLogicEditor({
           Add another condition
         </Button>
         {conditions.length > 0 && (
-          <button type="button" onClick={() => onChange([])} className="text-xs font-medium text-slate-500 hover:text-red-700">
+          <button type="button" onClick={onDisable} className="text-xs font-medium text-slate-500 hover:text-red-700">
             Turn display logic off
           </button>
         )}

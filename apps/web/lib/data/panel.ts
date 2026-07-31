@@ -191,7 +191,25 @@ function panelFilterConditions(tx: Tx, filters: PanelFilterGroup[]) {
         minAge <= maxAge
       ) {
         const year = new Date().getFullYear();
-        conditions.push(tx`p.birth_year between ${year - maxAge} and ${year - minAge}`);
+        // Some imported panels have only an age attribute while others have a
+        // birth year. Both sources describe the same inclusive age interval.
+        conditions.push(tx`(
+          p.birth_year between ${year - maxAge} and ${year - minAge}
+          or exists (
+            select 1
+            from panelist_attributes pa
+            join custom_fields cf on cf.id = pa.field_id and cf.org_id = p.org_id
+            cross join lateral jsonb_array_elements_text(
+              case when jsonb_typeof(pa.value) = 'array' then pa.value else jsonb_build_array(pa.value) end
+            ) stored(raw_value)
+            cross join lateral unnest(string_to_array(replace(stored.raw_value, ';', ','), ',')) token(item)
+            where pa.panelist_id = p.id
+              and pa.org_id = p.org_id
+              and lower(btrim(cf.key)) in ('age', 'alder')
+              and btrim(token.item) ~ '^[0-9]{1,3}$'
+              and btrim(token.item)::int between ${minAge} and ${maxAge}
+          )
+        )`);
       }
       continue;
     }

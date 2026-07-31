@@ -517,34 +517,50 @@ function QuestionInput({
 
       );
     case "first_click": {
-      const v = value as { x: number; y: number } | undefined;
-      const imageUrl = question.stimulus ? stimulusUrl(question.stimulus, assetToken) : question.imageUrl ?? "";
+      const response = value as { x: number; y: number; selectedAssetId?: string } | undefined;
+      const stimuli = question.stimuli ?? (question.stimulus ? [question.stimulus] : []);
+      const recordClick = (assetId: string, pt: { x: number; y: number }, meta: Record<string, unknown>) => {
+        onChange({ ...pt, selectedAssetId: assetId });
+        interactionsRef.current = [
+          ...interactionsRef.current.filter((entry) => entry.code !== question.code),
+          { code: question.code, eventType: "first_click", payload: { ...pt, ...meta, assetId } },
+        ];
+      };
       return (
         <div>
           {question.taskText && (
             <p className="mb-2 rounded-md bg-accent-soft px-3 py-2 text-sm">{lt(question.taskText, locale)}</p>
           )}
-          <FirstClickImage
-            imageUrl={imageUrl}
-            altText={question.stimulus?.altText ?? "Teststimulus"}
-            value={v}
-            onClickPoint={(pt, meta) => {
-              onChange(pt);
-              const entry = {
-                code: question.code,
-                eventType: "first_click",
-                payload: { ...pt, ...meta },
-              };
-              interactionsRef.current = [
-                ...interactionsRef.current.filter((e) => e.code !== question.code),
-                entry,
-              ];
-            }}
-          />
+          {stimuli.length > 0 ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {stimuli.map((stimulus, index) => (
+                <FirstClickImage
+                  key={stimulus.id}
+                  imageUrl={stimulusUrl(stimulus, assetToken)}
+                  altText={stimulus.altText}
+                  value={stimuli.length === 1 || response?.selectedAssetId === stimulus.assetId ? response : undefined}
+                  onClickPoint={(pt, meta) => recordClick(stimulus.assetId, pt, { ...meta, stimulusIndex: index })}
+                />
+              ))}
+            </div>
+          ) : (
+            <FirstClickImage
+              imageUrl={question.imageUrl ?? ""}
+              altText="Teststimulus"
+              value={response}
+              onClickPoint={(pt, meta) => {
+                onChange(pt);
+                interactionsRef.current = [
+                  ...interactionsRef.current.filter((entry) => entry.code !== question.code),
+                  { code: question.code, eventType: "first_click", payload: { ...pt, ...meta } },
+                ];
+              }}
+            />
+          )}
           <p className="mt-1 text-xs text-muted">
-            {v
-              ? locale === "da" ? "Klik registreret — du kan klikke igen for at ændre." : "Click recorded — click again to change."
-              : locale === "da" ? "Klik på billedet." : "Click on the image."}
+            {response
+              ? locale === "da" ? "Klik registreret \u2014 du kan klikke igen for at \u00e6ndre." : "Click recorded \u2014 click again to change."
+              : locale === "da" ? "Klik p\u00e5 et billede." : "Click on an image."}
           </p>
         </div>
       );

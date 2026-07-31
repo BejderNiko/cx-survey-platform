@@ -75,7 +75,7 @@ export function PanelFilterPanel({
   const lastAutoAppliedSignature = useRef(filterSignature);
 
   function addGroup(filterField: FilterField) {
-    const values = filterField.key === "age" ? ["18", "65"] : [];
+    const values = filterField.key === "age" ? ["", ""] : [];
     const operator = filterField.key === "age" ? "all" : "any";
     setGroups((current) => [...current, { id: nextGroupId(), field: filterField.key, key: filterField.attributeKey, operator, values }]);
     setOpen(true);
@@ -192,12 +192,12 @@ export function PanelFilterPanel({
                 {group.field === "age" ? (
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     <label className="text-xs font-medium text-heading">
-                      Minimumsalder
-                      <Input className="mt-1" type="number" min={0} max={120} value={group.values[0] ?? ""} onChange={(event) => updateGroup(group.id, { values: [event.target.value, group.values[1] ?? "65"] })} />
+                      Fra og med
+                      <Input className="mt-1" type="number" min={0} max={120} value={group.values[0] ?? ""} onChange={(event) => updateGroup(group.id, { values: [event.target.value, group.values[1] ?? ""] })} />
                     </label>
                     <label className="text-xs font-medium text-heading">
-                      Maksimumsalder
-                      <Input className="mt-1" type="number" min={0} max={120} value={group.values[1] ?? ""} onChange={(event) => updateGroup(group.id, { values: [group.values[0] ?? "18", event.target.value] })} />
+                      Til og med
+                      <Input className="mt-1" type="number" min={0} max={120} value={group.values[1] ?? ""} onChange={(event) => updateGroup(group.id, { values: [group.values[0] ?? "", event.target.value] })} />
                     </label>
                     <p className="text-xs text-muted sm:col-span-2">Alder beregnes omtrentligt fra fødselsår. Fødselsdato findes ikke i panelets datamodel.</p>
                   </div>

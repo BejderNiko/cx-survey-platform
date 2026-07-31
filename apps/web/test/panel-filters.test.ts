@@ -34,6 +34,10 @@ beforeAll(async () => {
     insert into custom_fields (org_id, key, label, field_type)
     values (${orgId}, 'bil', 'Bil', 'text')
     returning id`;
+  const [age] = await admin`
+    insert into custom_fields (org_id, key, label, field_type)
+    values (${orgId}, 'alder', 'Alder', 'number')
+    returning id`;
   const [vip] = await admin`insert into tags (org_id, name) values (${orgId}, 'vip') returning id`;
   const [newTag] = await admin`insert into tags (org_id, name) values (${orgId}, 'new') returning id`;
   const year = new Date().getFullYear();
@@ -57,7 +61,8 @@ beforeAll(async () => {
       (${gamma}, ${education.id}, ${orgId}, ${admin.json("University")}),
       (${alpha}, ${car.id}, ${orgId}, ${admin.json("Elbil,Benzin- eller dieselbil")}),
       (${beta}, ${car.id}, ${orgId}, ${admin.json("Hybridbil")}),
-      (${gamma}, ${car.id}, ${orgId}, ${admin.json("Ingen bil")})`;
+      (${gamma}, ${car.id}, ${orgId}, ${admin.json("Ingen bil")}),
+      (${gamma}, ${age.id}, ${orgId}, ${admin.json("40")})`;
   await admin`
     insert into panelist_tags (panelist_id, tag_id, org_id)
     values
@@ -119,6 +124,12 @@ describe("panel filter SQL", () => {
     const result = await asUser((tx) => listPanelists(tx, { filters: [{ field: "age", operator: "all", values: ["20", "35"] }] }));
     expect(result.total).toBe(2);
     expect(result.rows.map((row) => row.first_name).sort()).toEqual(["Alpha", "Gamma"]);
+  });
+
+  it("uses inclusive boundaries for imported age when birth year is missing", async () => {
+    const result = await asUser((tx) => listPanelists(tx, { filters: [{ field: "age", operator: "all", values: ["40", "40"] }] }));
+    expect(result.total).toBe(1);
+    expect(result.rows[0].first_name).toBe("Gamma");
   });
 
   it("pages rows while retaining the full filtered count", async () => {

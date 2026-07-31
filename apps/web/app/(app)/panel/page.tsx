@@ -126,9 +126,11 @@ export default async function PanelPage({ searchParams }: { searchParams: Promis
     const ageAttributeKey = findFieldKey(customFields, ["age", "alder"]);
     const carAttributeKey = findFieldKey(customFields, ["bil", "car", "vehicle", "biler"]);
     const productsAttributeKey = findFieldKey(customFields, ["products", "produkter", "produkter ved ok", "products at ok"], ["produkt", "product"]);
-    const ageFilter: FilterField = ageAttributeKey
-      ? { key: "custom", attributeKey: ageAttributeKey, label: String(customByKey.get(ageAttributeKey)?.label ?? "Age"), options: optionList(customByKey.get(ageAttributeKey)?.options, [], observedByKey.get(ageAttributeKey) ?? []) }
-      : { key: "age", label: "Alder", options: [] };
+    // Age is always an interval filter. The SQL matcher handles both a real
+    // birth year and common imported age fields ("age" / "alder"). Keeping
+    // one dedicated field prevents an imported age column from becoming a
+    // confusing checkbox list of every respondent age.
+    const ageFilter: FilterField = { key: "age", label: "Alder", options: [] };
 
     const filterFields: FilterField[] = [
       ageFilter,

@@ -110,7 +110,7 @@ export const question = z.object({
   imageUrl: z.string().optional(),               // first_click stimulus (data URI or path)
   taskText: localizedText.optional(),            // first_click task instruction
   stimulus: stimulusAsset.optional(),             // secure first-click asset (legacy imageUrl stays readable)
-  stimuli: z.array(stimulusAsset).min(2).max(8).optional(), // preference test assets
+  stimuli: z.array(stimulusAsset).min(1).max(8).optional(), // image-based question assets
   randomizeStimuli: z.boolean().optional(),
   contextOverride: stimulusAsset.nullable().optional(), // reserved question-level override; null hides study context
   visibleIf: z.array(condition).optional(),      // display conditions (AND)
@@ -234,7 +234,7 @@ export function validateInstrument(def: InstrumentDefinition): string[] {
         problems.push(`Rating question '${q.code}' needs an integer scale spanning 1 to 20 steps.`);
       }
     }
-    if (q.type === "first_click" && !q.imageUrl && !q.stimulus) {
+    if (q.type === "first_click" && !q.imageUrl && !q.stimulus && !(q.stimuli?.length)) {
       problems.push(`Første-klik-spørgsmålet '${q.code}' mangler et stimulusbillede.`);
     }
     if (q.type === "preference_test" && (!q.stimuli || q.stimuli.length < 2 || q.stimuli.length > 8)) {
