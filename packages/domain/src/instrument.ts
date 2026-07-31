@@ -91,6 +91,7 @@ export const question = z.object({
   label: localizedText,
   helpText: localizedText.optional(),
   required: z.boolean().default(false),
+  hidden: z.boolean().optional(),                  // excluded from participant preview/live flow
   options: z.array(option).optional(),          // choice / likert / ranking types
   randomizeOptions: z.boolean().optional(),
   scale: z
@@ -223,10 +224,20 @@ export function validateInstrument(def: InstrumentDefinition): string[] {
     }
   }
   const order = qs.map((q) => q.code);
+  const hiddenCodes = new Set(qs.filter((q) => q.hidden).map((q) => q.code));
   for (const q of qs) {
+    if (q.hidden && q.visibleIf?.length) {
+      problems.push(`Hidden question '${q.code}' cannot have display conditions.`);
+    }
+    if (q.hidden && q.branches?.length) {
+      problems.push(`Hidden question '${q.code}' cannot have routing rules.`);
+    }
     for (const b of q.branches ?? []) {
       if (b.goTo !== "END" && b.goTo !== "DISQUALIFY" && !codes.has(b.goTo)) {
         problems.push(`Branch on '${q.code}' targets unknown question '${b.goTo}'.`);
+      }
+      if (b.goTo !== "END" && b.goTo !== "DISQUALIFY" && hiddenCodes.has(b.goTo)) {
+        problems.push(`Branch on '${q.code}' cannot target hidden question '${b.goTo}'.`);
       }
       if (b.goTo !== "END" && b.goTo !== "DISQUALIFY" && order.indexOf(b.goTo) <= order.indexOf(q.code)) {
         problems.push(`Branch on '${q.code}' must jump forward (to avoid loops).`);
@@ -234,6 +245,8 @@ export function validateInstrument(def: InstrumentDefinition): string[] {
       for (const c of b.when) {
         if (!codes.has(c.questionCode)) {
           problems.push(`Branch condition on '${q.code}' references unknown question '${c.questionCode}'.`);
+        } else if (hiddenCodes.has(c.questionCode)) {
+          problems.push(`Branch condition on '${q.code}' cannot reference hidden question '${c.questionCode}'.`);
         } else if (order.indexOf(c.questionCode) > order.indexOf(q.code)) {
           problems.push(`Branch condition on '${q.code}' cannot reference a later question.`);
         }
@@ -242,6 +255,8 @@ export function validateInstrument(def: InstrumentDefinition): string[] {
     for (const c of q.visibleIf ?? []) {
       if (!codes.has(c.questionCode)) {
         problems.push(`Display condition on '${q.code}' references unknown question '${c.questionCode}'.`);
+      } else if (hiddenCodes.has(c.questionCode)) {
+        problems.push(`Display condition on '${q.code}' cannot reference hidden question '${c.questionCode}'.`);
       } else if (order.indexOf(c.questionCode) >= order.indexOf(q.code)) {
         problems.push(`Display condition on '${q.code}' must reference an earlier question.`);
       }

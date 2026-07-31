@@ -8,6 +8,7 @@ import {
   listPanelistIds,
   listPanelists,
   MAX_AUDIENCE_IDS,
+  parsePanelFilters,
   type PanelFilterGroup,
 } from "@/lib/data/panel";
 import { fmtDate } from "@/lib/format";
@@ -15,33 +16,12 @@ import { CUSTOMER_STATUS } from "@/lib/labels";
 import { PanelFilterPanel, type FilterField, type MessageOption, type PanelFilterGroup as ClientFilterGroup } from "./panel-filter-panel";
 import { PanelTable } from "./panel-table";
 
+const PAGE_SIZE = 50;
+
 const DEFAULT_OPTIONS: Record<string, string[]> = {
   uddannelse: ["Folkeskole", "Studentereksamen", "Erhvervsfaglig", "Kort videregående under 3 år", "Mellemlang videregående 3-4 år", "Lang videregående over 4 år", "Ønsker ikke at oplyse"],
   opvarmningskilde: ["Pillefyr", "Elvarme", "Varmepumpe", "Fjernvarme", "Jordvarme", "Solvarme", "Brændeovn", "Oliefyr", "Naturgas", "Bioenergi"],
 };
-
-function parseFilters(raw: string | undefined): PanelFilterGroup[] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.flatMap((item) => {
-      if (!item || typeof item !== "object") return [];
-      const value = item as Record<string, unknown>;
-      const field = value.field;
-      const operator = value.operator;
-      const values = value.values;
-      if (!(["uddannelse", "opvarmningskilde", "tag", "message_open", "custom", "customer_status"] as string[]).includes(String(field))) return [];
-      if (!(operator === "any" || operator === "all" || operator === "none")) return [];
-      if (!Array.isArray(values) || values.some((entry) => typeof entry !== "string")) return [];
-      const key = typeof value.key === "string" ? value.key : undefined;
-      if (field === "custom" && !key) return [];
-      return [{ field, operator, values, ...(key ? { key } : {}) } as PanelFilterGroup];
-    });
-  } catch {
-    return [];
-  }
-}
 
 function asClientFilters(filters: PanelFilterGroup[]): ClientFilterGroup[] {
   return filters.map((filter, index) => ({ ...filter, id: `server-group-${index}` }));
@@ -59,10 +39,12 @@ export default async function PanelPage({
 }) {
   const session = await requireSession();
   const sp = await searchParams;
-  const filters = parseFilters(sp.filters);
+  const filters = parsePanelFilters(sp.filters);
+  const requestedPage = Number.parseInt(sp.page ?? "1", 10);
+  const page = Number.isFinite(requestedPage) ? Math.max(1, requestedPage) : 1;
 
   const data = await withUser(session.userId, session.orgId, async (tx) => {
-    const listParams = {
+    const requestedListParams = {
       q: sp.q,
       tag: sp.tag,
       lifecycle: sp.lifecycle,
@@ -70,9 +52,18 @@ export default async function PanelPage({
       language: sp.language,
       filters,
       sort: (sp.sort as "name" | "created" | "email") ?? "name",
-      limit: 500,
+      limit: PAGE_SIZE,
+      offset: (page - 1) * PAGE_SIZE,
     };
-    const { rows, total: filtered } = await listPanelists(tx, listParams);
+    const firstPage = await listPanelists(tx, requestedListParams);
+    const lastPage = Math.max(1, Math.ceil(firstPage.total / PAGE_SIZE));
+    const effectivePage = Math.min(page, lastPage);
+    const listParams = effectivePage === page
+      ? requestedListParams
+      : { ...requestedListParams, offset: (effectivePage - 1) * PAGE_SIZE };
+    const { rows, total: filtered } = effectivePage === page
+      ? firstPage
+      : await listPanelists(tx, listParams);
     const [totalRow] = await tx`select count(*)::int as count from panelists where org_id = ${session.orgId}`;
 
     let available: number | null = null;
@@ -98,6 +89,7 @@ export default async function PanelPage({
     ]);
     const customByKey = new Map(customFields.map((field) => [String(field.key), field]));
     const filterFields: FilterField[] = [
+      { key: "age", label: "Aldersgruppe", options: [] },
       { key: "uddannelse", label: "Uddannelse", options: optionList(customByKey.get("uddannelse")?.options, DEFAULT_OPTIONS.uddannelse) },
       { key: "opvarmningskilde", label: "Opvarmningskilde", options: optionList(customByKey.get("opvarmningskilde")?.options, DEFAULT_OPTIONS.opvarmningskilde) },
       { key: "customer_status", label: "Customer relation", options: Object.entries(CUSTOMER_STATUS).map(([value, label]) => ({ value, label })) },
@@ -116,12 +108,23 @@ export default async function PanelPage({
       rows,
       filtered,
       total: Number(totalRow.count),
+      page: effectivePage,
       available,
       tags: tagRows.map((tag) => String(tag.name)),
       filterFields,
       messages,
     };
   });
+
+  const totalPages = Math.max(1, Math.ceil(data.filtered / PAGE_SIZE));
+  const currentPage = data.page;
+  const pageHref = (targetPage: number) => {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(sp)) if (value) params.set(key, value);
+    if (targetPage <= 1) params.delete("page");
+    else params.set("page", String(targetPage));
+    return `/panel?${params.toString()}`;
+  };
 
   return (
     <div className="mx-auto max-w-[1500px] space-y-5">
@@ -137,6 +140,7 @@ export default async function PanelPage({
       />
 
       <PanelFilterPanel
+        key={sp.filters ?? "no-filters"}
         fields={data.filterFields}
         messages={data.messages}
         initialFilters={asClientFilters(filters)}
@@ -171,9 +175,16 @@ export default async function PanelPage({
             hasConsent: r.has_consent as boolean,
           }))}
         />
+        {data.filtered > PAGE_SIZE && (
+          <nav className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4" aria-label="Panelist pages">
+            <p className="text-xs text-muted">Side {currentPage} af {totalPages} · {data.filtered} match</p>
+            <div className="flex gap-2">
+              {currentPage > 1 && <LinkButton href={pageHref(currentPage - 1)} variant="secondary">Forrige</LinkButton>}
+              {currentPage < totalPages && <LinkButton href={pageHref(currentPage + 1)} variant="secondary">Næste</LinkButton>}
+            </div>
+          </nav>
+        )}
       </Card>
-
-      {data.filtered > 500 && <p className="text-xs text-muted">Viser de første 500 match. Tilføj filtre for at se et mindre udsnit.</p>}
     </div>
   );
 }

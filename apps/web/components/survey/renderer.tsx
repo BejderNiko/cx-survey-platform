@@ -58,7 +58,7 @@ export function SurveyRenderer({
   const [submitting, setSubmitting] = useState(false);
   const interactionsRef = useRef<InteractionPayload[]>([]);
 
-  const questions = useMemo(() => allQuestions(definition), [definition]);
+  const questions = useMemo(() => allQuestions(definition).filter((question) => !question.hidden), [definition]);
   const total = questions.length;
 
   const goNext = useCallback(

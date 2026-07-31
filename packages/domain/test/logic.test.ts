@@ -90,6 +90,24 @@ describe("survey logic engine", () => {
     ]);
   });
 
+  it("skips questions hidden from participants", () => {
+    const hidden = structuredClone(def);
+    hidden.blocks[0].questions[3].hidden = true;
+    expect(visiblePath(hidden, { screener: "yes", nps_score: 10 })).toEqual([
+      "screener",
+      "nps_score",
+      "email_optin",
+    ]);
+  });
+
+  it("skips a hidden first question", () => {
+    const hidden = structuredClone(def);
+    hidden.blocks[0].questions[0].hidden = true;
+    const step = nextStep(hidden, null, {});
+    expect(step.kind).toBe("question");
+    if (step.kind === "question") expect(step.question.code).toBe("nps_score");
+  });
+
   it("flags backward branches and unknown targets", () => {
     const bad = structuredClone(def);
     bad.blocks[0].questions[3].branches = [
@@ -97,5 +115,26 @@ describe("survey logic engine", () => {
     ];
     const problems = validateInstrument(bad);
     expect(problems.some((p) => p.includes("jump forward"))).toBe(true);
+  });
+
+  it("rejects logic that depends on or targets hidden questions", () => {
+    const bad = structuredClone(def);
+    bad.blocks[0].questions[1].hidden = true;
+    bad.blocks[0].questions[2].visibleIf = [{ questionCode: "nps_score", op: "answered" }];
+    bad.blocks[0].questions[0].branches = [
+      { id: "hidden-target", when: [{ questionCode: "screener", op: "answered" }], goTo: "nps_score" },
+    ];
+    const problems = validateInstrument(bad);
+    expect(problems).toEqual(expect.arrayContaining([
+      "Hidden question 'nps_score' cannot have routing rules.",
+      "Display condition on 'detractor_why' cannot reference hidden question 'nps_score'.",
+    ]));
+  });
+
+  it("rejects logic configured on a hidden question", () => {
+    const bad = structuredClone(def);
+    bad.blocks[0].questions[2].hidden = true;
+    const problems = validateInstrument(bad);
+    expect(problems).toContain("Hidden question 'detractor_why' cannot have display conditions.");
   });
 });

@@ -296,6 +296,7 @@ function BuilderSidebar({ definition, locale }: { definition: InstrumentDefiniti
           <SidebarLink href="#welcome-screen" label="Welcome screen" tone="slate" icon="spark" />
           {definition.blocks.map((block, index) => {
             const hasDesign = block.questions.some((question) => question.type === "first_click");
+            const hiddenCount = block.questions.filter((question) => question.hidden).length;
             const title = block.title?.[locale] || block.title?.[locale === "da" ? "en" : "da"] || (hasDesign ? "Design survey" : "Survey questions");
             return (
               <SidebarLink
@@ -304,6 +305,7 @@ function BuilderSidebar({ definition, locale }: { definition: InstrumentDefiniti
                 label={`${index + 1}. ${title}`}
                 tone={hasDesign ? "amber" : "orange"}
                 icon={hasDesign ? "image" : "question"}
+                hiddenCount={hiddenCount}
                 drag
               />
             );
@@ -322,12 +324,13 @@ function BuilderSidebar({ definition, locale }: { definition: InstrumentDefiniti
 }
 
 function SidebarLink({
-  href, label, tone, icon, drag = false,
+  href, label, tone, icon, hiddenCount = 0, drag = false,
 }: {
   href: string;
   label: string;
   tone: "slate" | "orange" | "amber";
   icon: IconName;
+  hiddenCount?: number;
   drag?: boolean;
 }) {
   const tones = {
@@ -339,6 +342,7 @@ function SidebarLink({
     <a href={href} className="group flex min-w-0 items-center gap-2 rounded-lg px-2 py-2 text-[13px] text-slate-700 hover:bg-slate-200/60 hover:text-slate-950">
       <span className={cn("grid h-5 w-5 shrink-0 place-items-center rounded", tones[tone])}><Icon name={icon} size={12} /></span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
+      {hiddenCount > 0 && <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold text-slate-600">{hiddenCount} skjult</span>}
       {drag && <Icon name="grip" size={13} className="text-slate-400 opacity-0 group-hover:opacity-100" />}
     </a>
   );
@@ -623,8 +627,9 @@ function QuestionCard({
   const priorQuestions = allQuestions.slice(0, index);
   const laterQuestions = allQuestions.slice(index + 1);
   const hasLogic = Boolean(question.visibleIf?.length || question.branches?.length);
+  const [logicOpen, setLogicOpen] = useState(hasLogic);
   return (
-    <article id={`question-${question.code}`} className="scroll-mt-24 rounded-xl border border-[#d8dde1] bg-white p-4 transition-shadow focus-within:border-slate-400 focus-within:shadow-[0_4px_18px_rgba(15,23,42,0.08)]">
+    <article id={`question-${question.code}`} className={cn("scroll-mt-24 rounded-xl border p-4 transition-shadow focus-within:border-slate-400 focus-within:shadow-[0_4px_18px_rgba(15,23,42,0.08)]", question.hidden ? "border-dashed border-slate-300 bg-slate-50/80" : "border-[#d8dde1] bg-white")}>
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" aria-label={`Drag question ${number}`} className="cursor-grab text-slate-400 hover:text-slate-700"><Icon name="grip" /></button>
         <span className="text-sm font-bold text-slate-900">{number}</span>
@@ -640,6 +645,7 @@ function QuestionCard({
               label: question.label,
               helpText: question.helpText,
               required: question.required,
+              hidden: question.hidden,
               visibleIf: question.visibleIf,
               branches: question.branches,
             });
@@ -648,22 +654,22 @@ function QuestionCard({
         >
           {QUESTION_TYPES.map((type) => <option key={type} value={type}>{QUESTION_META[type].label}</option>)}
         </Select>
-        <div className="ml-auto flex items-center gap-2">
-          <span className="hidden text-xs text-slate-700 sm:inline">Required</span>
-          <Toggle checked={question.required} onChange={(checked) => onChange({ required: checked })} aria-label={`Question ${number} required`} />
-          <span className={cn("inline-flex h-7 items-center gap-1 rounded-md px-2 text-[10px] font-bold uppercase tracking-wide", hasLogic ? "bg-cyan-100 text-cyan-800" : "bg-slate-100 text-slate-500")}>
-            <Icon name="logic" size={12} /> Logic {hasLogic ? "on" : "off"}
-          </span>
-          <span className="grid h-7 w-7 place-items-center rounded-md bg-slate-50 text-slate-500" title="Participant preview available from top bar"><Icon name="eye" size={14} /></span>
-          <details className="relative">
-            <summary className="grid h-7 w-7 cursor-pointer list-none place-items-center rounded-md bg-slate-50 text-slate-500 hover:bg-slate-100" aria-label={`Question ${number} menu`}><Icon name="more" size={14} /></summary>
-            <div className="absolute right-0 z-20 mt-1 w-40 rounded-lg border border-slate-200 bg-white p-1 text-xs shadow-lg">
-              <button type="button" disabled={!canMoveUp} onClick={onMoveUp} className="w-full rounded-md px-3 py-2 text-left hover:bg-slate-50 disabled:opacity-40">Move up</button>
-              <button type="button" disabled={!canMoveDown} onClick={onMoveDown} className="w-full rounded-md px-3 py-2 text-left hover:bg-slate-50 disabled:opacity-40">Move down</button>
-              <button type="button" onClick={onRemove} className="w-full rounded-md px-3 py-2 text-left text-red-700 hover:bg-red-50">Delete question</button>
-            </div>
-          </details>
-        </div>
+        <QuestionHeaderToolbar
+          number={number}
+          required={question.required}
+          hidden={Boolean(question.hidden)}
+          hasLogic={hasLogic}
+          logicRuleCount={(question.visibleIf?.length ?? 0) + (question.branches?.length ?? 0)}
+          logicOpen={logicOpen}
+          onRequiredChange={(required) => onChange({ required })}
+          onLogicToggle={() => setLogicOpen((value) => !value)}
+          onHiddenChange={(hidden) => onChange({ hidden })}
+          onMoveUp={onMoveUp}
+          onMoveDown={onMoveDown}
+          onRemove={onRemove}
+          canMoveUp={canMoveUp}
+          canMoveDown={canMoveDown}
+        />
       </div>
       <div className="mt-4">
         {question.type === "first_click" ? (
@@ -672,8 +678,62 @@ function QuestionCard({
           <QuestionBody question={question} locale={locale} onChange={onChange} />
         )}
       </div>
-      <LogicEditor question={question} priorQuestions={priorQuestions} laterQuestions={laterQuestions} onChange={onChange} />
+      <LogicEditor open={logicOpen} question={question} priorQuestions={priorQuestions} laterQuestions={laterQuestions} onChange={onChange} />
     </article>
+  );
+}
+
+function QuestionHeaderToolbar({
+  number, required, hidden, hasLogic, logicRuleCount, logicOpen,
+  onRequiredChange, onLogicToggle, onHiddenChange, onMoveUp, onMoveDown, onRemove,
+  canMoveUp, canMoveDown,
+}: {
+  number: string;
+  required: boolean;
+  hidden: boolean;
+  hasLogic: boolean;
+  logicRuleCount: number;
+  logicOpen: boolean;
+  onRequiredChange: (required: boolean) => void;
+  onLogicToggle: () => void;
+  onHiddenChange: (hidden: boolean) => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onRemove: () => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+}) {
+  return (
+    <div className="ml-auto flex min-h-9 flex-wrap items-center justify-end gap-2">
+      <span className="text-xs leading-none text-slate-700">Required</span>
+      <Toggle checked={required} onChange={onRequiredChange} aria-label={`Question ${number} required`} />
+      <button
+        type="button"
+        onClick={onLogicToggle}
+        aria-expanded={logicOpen}
+        className={cn("inline-flex h-8 items-center gap-1 rounded-md px-2 text-[10px] font-bold uppercase tracking-wide", hasLogic ? "bg-cyan-100 text-cyan-800" : "bg-slate-100 text-slate-600")}
+      >
+        <Icon name="logic" size={12} /> Logic {hasLogic ? `on · ${logicRuleCount}` : "off"}
+      </button>
+      <button
+        type="button"
+        onClick={() => onHiddenChange(!hidden)}
+        aria-pressed={hidden}
+        aria-label={hidden ? `Show question ${number} to participants` : `Hide question ${number} from participants`}
+        title={hidden ? "Hidden from participant preview and live surveys" : "Visible to participants"}
+        className={cn("grid h-8 w-8 place-items-center rounded-md", hidden ? "bg-slate-700 text-white" : "bg-slate-50 text-slate-600 hover:bg-slate-100")}
+      >
+        <Icon name={hidden ? "eye-off" : "eye"} size={14} />
+      </button>
+      <details className="relative">
+        <summary className="grid h-8 w-8 cursor-pointer list-none place-items-center rounded-md bg-slate-50 text-slate-600 hover:bg-slate-100" aria-label={`Question ${number} menu`}><Icon name="more" size={14} /></summary>
+        <div className="absolute right-0 z-20 mt-1 w-40 rounded-lg border border-slate-200 bg-white p-1 text-xs shadow-lg">
+          <button type="button" disabled={!canMoveUp} onClick={onMoveUp} className="w-full rounded-md px-3 py-2 text-left hover:bg-slate-50 disabled:opacity-40">Move up</button>
+          <button type="button" disabled={!canMoveDown} onClick={onMoveDown} className="w-full rounded-md px-3 py-2 text-left hover:bg-slate-50 disabled:opacity-40">Move down</button>
+          <button type="button" onClick={onRemove} className="w-full rounded-md px-3 py-2 text-left text-red-700 hover:bg-red-50">Delete question</button>
+        </div>
+      </details>
+    </div>
   );
 }
 
@@ -859,23 +919,23 @@ function MatrixEditor({ question, locale, onChange }: { question: Question; loca
 }
 
 function LogicEditor({
-  question, priorQuestions, laterQuestions, onChange,
+  open, question, priorQuestions, laterQuestions, onChange,
 }: {
+  open: boolean;
   question: Question;
   priorQuestions: Question[];
   laterQuestions: Question[];
   onChange: (patch: Partial<Question>) => void;
 }) {
-  const hasLogic = Boolean(question.visibleIf?.length || question.branches?.length);
+  if (!open) return null;
   return (
-    <details className="mt-4 border-t border-slate-200 pt-3" open={hasLogic || undefined}>
-      <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-semibold text-slate-700">
+    <section className="mt-4 border-t border-slate-200 pt-3" aria-label={`Logic rules for ${question.code}`}>
+      <div className="mb-3 flex items-center gap-2 text-xs font-semibold text-slate-700">
         <Icon name="logic" size={14} />
-        Logic
-        <span className={cn("rounded px-1.5 py-0.5 text-[9px] font-bold uppercase", hasLogic ? "bg-cyan-100 text-cyan-800" : "bg-slate-100 text-slate-500")}>{hasLogic ? "On" : "Off"}</span>
+        Logic rules
         <span className="ml-auto text-[11px] font-normal text-slate-500">Display conditions and answer routing</span>
-      </summary>
-      <div className="mt-3 grid gap-4 rounded-lg bg-slate-50 p-3 xl:grid-cols-2">
+      </div>
+      <div className="grid gap-4 rounded-lg bg-slate-50 p-3 xl:grid-cols-2">
         <div>
           <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">Show this question if</p>
           <ConditionRows conditions={question.visibleIf ?? []} candidates={priorQuestions} onChange={(visibleIf) => onChange({ visibleIf })} />
@@ -917,7 +977,7 @@ function LogicEditor({
           })}>Add routing rule</Button>
         </div>
       </div>
-    </details>
+    </section>
   );
 }
 
@@ -983,13 +1043,14 @@ function Toggle(props: { checked: boolean; onChange?: (checked: boolean) => void
   );
 }
 
-type IconName = "arrow-left" | "eye" | "save" | "details" | "spark" | "grip" | "image" | "question" | "thumb" | "info" | "plus-circle" | "more" | "plus" | "logic" | "trash";
+type IconName = "arrow-left" | "eye" | "eye-off" | "save" | "details" | "spark" | "grip" | "image" | "question" | "thumb" | "info" | "plus-circle" | "more" | "plus" | "logic" | "trash";
 
 function Icon({ name, size = 16, className }: { name: IconName; size?: number; className?: string }) {
   let content: ReactNode;
   switch (name) {
     case "arrow-left": content = <><path d="m15 18-6-6 6-6" /><path d="M9 12h10" /></>; break;
     case "eye": content = <><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" /><circle cx="12" cy="12" r="2.5" /></>; break;
+    case "eye-off": content = <><path d="m3 3 18 18" /><path d="M10.6 6.2A10.8 10.8 0 0 1 12 6c6 0 9.5 6 9.5 6a17 17 0 0 1-2.1 2.8M6.2 6.2C3.8 8 2.5 12 2.5 12s3.5 6 9.5 6a10.6 10.6 0 0 0 3.2-.5" /></>; break;
     case "save": content = <><path d="M5 3h12l2 2v16H5Z" /><path d="M8 3v6h8V3M8 21v-7h8v7" /></>; break;
     case "details": content = <><path d="M5 7h14M5 12h14M5 17h9" /></>; break;
     case "spark": content = <><path d="M12 3v3M12 18v3M3 12h3M18 12h3" /><circle cx="12" cy="12" r="4" /></>; break;

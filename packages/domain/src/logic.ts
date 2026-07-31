@@ -99,7 +99,7 @@ export function nextStep(
 function firstVisibleFrom(questions: Question[], start: number, answers: AnswerMap): FlowStep {
   for (let i = start; i < questions.length; i++) {
     const q = questions[i];
-    if (conditionsHold(q.visibleIf, answers)) {
+    if (!q.hidden && conditionsHold(q.visibleIf, answers)) {
       return { kind: "question", question: q };
     }
   }

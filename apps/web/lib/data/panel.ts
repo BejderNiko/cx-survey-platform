@@ -2,12 +2,67 @@ import { randomSample, type SegmentDefinition, type SegmentFilter } from "@ok/do
 import type { Tx } from "../db";
 
 /** Panel data access: list/filter/segment SQL, profile, governance checks. */
-export type PanelFilterField = "uddannelse" | "opvarmningskilde" | "tag" | "message_open" | "custom" | "customer_status";
+export const PANEL_FILTER_FIELDS = [
+  "uddannelse",
+  "opvarmningskilde",
+  "tag",
+  "message_open",
+  "custom",
+  "customer_status",
+  "age",
+] as const;
+export type PanelFilterField = (typeof PANEL_FILTER_FIELDS)[number];
 export interface PanelFilterGroup {
   field: PanelFilterField;
   operator: "any" | "all" | "none";
   values: string[];
   key?: string;
+}
+
+const PANEL_FILTER_FIELD_SET = new Set<string>(PANEL_FILTER_FIELDS);
+const PANEL_FILTER_OPERATORS = new Set(["any", "all", "none"]);
+
+/**
+ * Parse the URL representation shared by the Panel page and audience flows.
+ * Invalid groups are rejected instead of reaching SQL with ambiguous values.
+ */
+export function parsePanelFilters(raw: string | undefined): PanelFilterGroup[] {
+  if (!raw || raw.length > 20_000) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.slice(0, 50).flatMap((item) => {
+      if (!item || typeof item !== "object") return [];
+      const value = item as Record<string, unknown>;
+      const field = String(value.field);
+      const operator = String(value.operator);
+      if (!PANEL_FILTER_FIELD_SET.has(field) || !PANEL_FILTER_OPERATORS.has(operator)) return [];
+      if (!Array.isArray(value.values) || value.values.some((entry) => typeof entry !== "string")) return [];
+      const values = value.values.slice(0, 100).map((entry) => entry.trim()).filter(Boolean);
+      const key = typeof value.key === "string" ? value.key.trim() : undefined;
+      if (field === "custom" && !key) return [];
+      if (field === "age") {
+        if (values.length !== 2) return [];
+        const [minAge, maxAge] = values.map(Number);
+        if (
+          !Number.isInteger(minAge) ||
+          !Number.isInteger(maxAge) ||
+          minAge < 0 ||
+          maxAge > 120 ||
+          minAge > maxAge
+        ) return [];
+        return [{ field: "age", operator: "all", values: [String(minAge), String(maxAge)] }];
+      }
+      return [{
+        field: field as PanelFilterField,
+        operator: operator as PanelFilterGroup["operator"],
+        values,
+        ...(key ? { key } : {}),
+      }];
+    });
+  } catch {
+    return [];
+  }
 }
 
 export interface PanelListParams {
@@ -91,6 +146,21 @@ function panelFilterConditions(tx: Tx, filters: PanelFilterGroup[]) {
   for (const group of filters) {
     const values = group.values.filter(Boolean);
     if (values.length === 0) continue;
+    if (group.field === "age") {
+      const [minAge, maxAge] = values.map(Number);
+      if (
+        values.length === 2 &&
+        Number.isInteger(minAge) &&
+        Number.isInteger(maxAge) &&
+        minAge >= 0 &&
+        maxAge <= 120 &&
+        minAge <= maxAge
+      ) {
+        const year = new Date().getFullYear();
+        conditions.push(tx`p.birth_year between ${year - maxAge} and ${year - minAge}`);
+      }
+      continue;
+    }
     if (group.operator === "all") {
       conditions.push(...values.map((value) => panelFilterCondition(tx, group, value)));
       continue;
@@ -118,7 +188,7 @@ function panelistWhere(tx: Tx, params: PanelListParams) {
   if (params.filters) conds.push(...panelFilterConditions(tx, params.filters));
 
   let where = tx`true`;
-  for (const c of conds) where = tx`${where} and ${c}`;
+  for (const c of conds) where = tx`${where} and (${c})`;
   return where;
 }
 

@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Badge, Button, Card, Select } from "@/components/ui";
+import { Badge, Button, Card, Input, Select } from "@/components/ui";
 
 export type FilterOperator = "any" | "all" | "none";
-export type FilterGroupField = "uddannelse" | "opvarmningskilde" | "tag" | "message_open" | "custom" | "customer_status";
+export type FilterGroupField = "uddannelse" | "opvarmningskilde" | "tag" | "message_open" | "custom" | "customer_status" | "age";
 export interface PanelFilterGroup {
   id: string;
   field: FilterGroupField;
@@ -43,6 +43,10 @@ function messageValue(id: string, mode: "opened" | "not_opened") {
   return `${mode}:${id}`;
 }
 
+function serializeFilterGroups(groups: PanelFilterGroup[]) {
+  return JSON.stringify(groups.map(({ field, key, operator, values }) => ({ field, ...(key ? { key } : {}), operator, values })));
+}
+
 export function PanelFilterPanel({
   fields,
   messages,
@@ -65,9 +69,14 @@ export function PanelFilterPanel({
   const [open, setOpen] = useState(initialFilters.length > 0);
   const [groups, setGroups] = useState<PanelFilterGroup[]>(initialFilters);
   const [showAllMessages, setShowAllMessages] = useState(false);
+  const [fieldQuery, setFieldQuery] = useState("");
+  const [pending, startTransition] = useTransition();
+  const firstFilterRender = useRef(true);
 
   function addGroup(filterField: FilterField) {
-    setGroups((current) => [...current, { id: nextGroupId(), field: filterField.key, key: filterField.attributeKey, operator: "any", values: [] }]);
+    const values = filterField.key === "age" ? ["18", "65"] : [];
+    const operator = filterField.key === "age" ? "all" : "any";
+    setGroups((current) => [...current, { id: nextGroupId(), field: filterField.key, key: filterField.attributeKey, operator, values }]);
     setOpen(true);
   }
 
@@ -87,18 +96,47 @@ export function PanelFilterPanel({
     });
   }
 
+  const panelUrl = useMemo(() => {
+    const complete = groups.every((group) => {
+      if (group.field !== "age") return group.values.length > 0;
+      const [minAge, maxAge] = group.values.map(Number);
+      return group.values.length === 2 && Number.isInteger(minAge) && Number.isInteger(maxAge) && minAge >= 0 && maxAge <= 120 && minAge <= maxAge;
+    });
+    if (!complete) return null;
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("page");
+    if (currentSearch?.trim()) params.set("q", currentSearch.trim());
+    if (groups.length > 0) params.set("filters", serializeFilterGroups(groups));
+    else params.delete("filters");
+    const query = params.toString();
+    return query ? `/panel?${query}` : "/panel";
+  }, [currentSearch, groups, searchParams]);
+
+  useEffect(() => {
+    if (firstFilterRender.current) {
+      firstFilterRender.current = false;
+      return;
+    }
+    if (!panelUrl) return;
+    const timer = window.setTimeout(() => {
+      startTransition(() => router.replace(panelUrl, { scroll: false }));
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [panelUrl, router]);
+
   function applyFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const params = new URLSearchParams(searchParams.toString());
-    if (currentSearch?.trim()) params.set("q", currentSearch.trim());
-    if (groups.length > 0) params.set("filters", JSON.stringify(groups.map(({ field, key, operator, values }) => ({ field, ...(key ? { key } : {}), operator, values }))));
-    else params.delete("filters");
-    router.push(`/panel?${params.toString()}`);
+    if (panelUrl) router.push(panelUrl);
   }
 
   function fieldFor(group: PanelFilterGroup) {
     return fields.find((field) => field.key === group.field && (group.field !== "custom" || field.attributeKey === group.key));
   }
+
+  const normalizedFieldQuery = fieldQuery.trim().toLocaleLowerCase("da");
+  const selectableFields = fields.filter((field) =>
+    field.key !== "message_open" && (!normalizedFieldQuery || field.label.toLocaleLowerCase("da").includes(normalizedFieldQuery)),
+  );
 
   return (
     <Card>
@@ -120,13 +158,27 @@ export function PanelFilterPanel({
 
       {open && (
         <form onSubmit={applyFilters} className="mt-4 max-h-[min(640px,70vh)] space-y-3 overflow-y-auto pr-1">
+          <Input
+            type="search"
+            value={fieldQuery}
+            onChange={(event) => setFieldQuery(event.target.value)}
+            placeholder="Søg efter filterfelt"
+            aria-label="Søg efter filterfelt"
+          />
           <div className="flex flex-wrap gap-2">
-            {fields.filter((field) => field.key !== "message_open").map((field) => (
-              <Button key={field.key} type="button" size="sm" variant="ghost" onClick={() => addGroup(field)}>
-                + {field.label}
+            {selectableFields.map((field) => {
+              const active = groups.some((group) => group.field === field.key && (field.key !== "custom" || group.key === field.attributeKey));
+              return (
+                <Button key={`${field.key}:${field.attributeKey ?? ""}`} type="button" size="sm" variant={active ? "secondary" : "ghost"} onClick={() => addGroup(field)}>
+                  + {field.label} {active && <Badge tone="blue">ACTIVE</Badge>}
+                </Button>
+              );
+            })}
+            {messages.length > 0 && (!normalizedFieldQuery || "message open".includes(normalizedFieldQuery)) && (
+              <Button type="button" size="sm" variant={groups.some((group) => group.field === "message_open") ? "secondary" : "ghost"} onClick={() => addGroup({ key: "message_open", label: "Message open", options: [] })}>
+                + Message open {groups.some((group) => group.field === "message_open") && <Badge tone="blue">ACTIVE</Badge>}
               </Button>
-            ))}
-            {messages.length > 0 && <Button type="button" size="sm" variant="ghost" onClick={() => addGroup({ key: "message_open", label: "Message open", options: [] })}>+ Message open</Button>}
+            )}
           </div>
 
           {groups.map((group) => {
@@ -139,28 +191,44 @@ export function PanelFilterPanel({
                   <h3 className="text-sm font-semibold text-heading">{field?.label ?? group.field}</h3>
                   <Button type="button" variant="ghost" size="sm" aria-label={`Remove ${field?.label ?? group.field} filter`} onClick={() => removeGroup(group.id)}>×</Button>
                 </div>
-                <Select className="mt-2 w-full sm:max-w-xs" value={group.operator} onChange={(event) => updateGroup(group.id, { operator: event.target.value as FilterOperator })} aria-label={`${field?.label ?? group.field} operator`}>
-                  {Object.entries(OPERATOR_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                </Select>
-                <p className="mt-2 text-xs text-muted">Select options to filter</p>
-                <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                  {group.field === "message_open"
-                    ? visibleMessages.flatMap((message) => [
-                      [messageValue(message.id, "opened"), `Have opened · ${message.label}`, message.date],
-                      [messageValue(message.id, "not_opened"), `Have not opened · ${message.label}`, message.date],
-                    ] as const).map(([value, label, date]) => (
-                      <label key={value} className="flex min-w-0 items-start gap-2 rounded-lg border border-line/70 px-2 py-2 text-sm">
-                        <input type="checkbox" checked={group.values.includes(value)} onChange={() => toggleValue(group, value)} />
-                        <span className="min-w-0"><span className="block truncate">{label}</span><span className="text-xs text-muted">{date}</span></span>
-                      </label>
-                    ))
-                    : options.map((option) => (
-                      <label key={option.value} className="flex min-w-0 items-center gap-2 rounded-lg border border-line/70 px-2 py-2 text-sm">
-                        <input type="checkbox" checked={group.values.includes(option.value)} onChange={() => toggleValue(group, option.value)} />
-                        <span className="truncate">{option.label}</span>
-                      </label>
-                    ))}
-                </div>
+                {group.field === "age" ? (
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <label className="text-xs font-medium text-heading">
+                      Minimumsalder
+                      <Input className="mt-1" type="number" min={0} max={120} value={group.values[0] ?? ""} onChange={(event) => updateGroup(group.id, { values: [event.target.value, group.values[1] ?? "65"] })} />
+                    </label>
+                    <label className="text-xs font-medium text-heading">
+                      Maksimumsalder
+                      <Input className="mt-1" type="number" min={0} max={120} value={group.values[1] ?? ""} onChange={(event) => updateGroup(group.id, { values: [group.values[0] ?? "18", event.target.value] })} />
+                    </label>
+                    <p className="text-xs text-muted sm:col-span-2">Alder beregnes omtrentligt fra fødselsår. Fødselsdato findes ikke i panelets datamodel.</p>
+                  </div>
+                ) : (
+                  <>
+                    <Select className="mt-2 w-full sm:max-w-xs" value={group.operator} onChange={(event) => updateGroup(group.id, { operator: event.target.value as FilterOperator })} aria-label={`${field?.label ?? group.field} operator`}>
+                      {Object.entries(OPERATOR_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </Select>
+                    <p className="mt-2 text-xs text-muted">Select options to filter</p>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                      {group.field === "message_open"
+                        ? visibleMessages.flatMap((message) => [
+                          [messageValue(message.id, "opened"), `Have opened · ${message.label}`, message.date],
+                          [messageValue(message.id, "not_opened"), `Have not opened · ${message.label}`, message.date],
+                        ] as const).map(([value, label, date]) => (
+                          <label key={value} className="flex min-w-0 items-start gap-2 rounded-lg border border-line/70 px-2 py-2 text-sm">
+                            <input type="checkbox" checked={group.values.includes(value)} onChange={() => toggleValue(group, value)} />
+                            <span className="min-w-0"><span className="block truncate">{label}</span><span className="text-xs text-muted">{date}</span></span>
+                          </label>
+                        ))
+                        : options.map((option) => (
+                          <label key={option.value} className="flex min-w-0 items-center gap-2 rounded-lg border border-line/70 px-2 py-2 text-sm">
+                            <input type="checkbox" checked={group.values.includes(option.value)} onChange={() => toggleValue(group, option.value)} />
+                            <span className="truncate">{option.label}</span>
+                          </label>
+                        ))}
+                    </div>
+                  </>
+                )}
                 {group.field === "message_open" && messages.length > 20 && (
                   <Button type="button" variant="ghost" size="sm" className="mt-2" onClick={() => setShowAllMessages((value) => !value)}>
                     {showAllMessages ? "SHOW FEWER MESSAGES" : "SHOW ALL MESSAGES"}
@@ -172,8 +240,8 @@ export function PanelFilterPanel({
 
           {groups.length === 0 && <p className="rounded-xl border border-dashed border-line px-4 py-5 text-sm text-muted">Tilføj Uddannelse, Opvarmningskilde, et panelspørgsmål, tags, kunderelation eller Message open.</p>}
           <div className="flex flex-wrap items-center gap-2 pt-1">
-            <Button type="submit" variant="primary">Anvend filtre</Button>
-            {groups.length > 0 && <Badge tone="blue">{groups.length} filtergruppe{groups.length === 1 ? "" : "r"}</Badge>}
+            <Button type="submit" variant="primary" disabled={!panelUrl || pending}>{pending ? "Opdaterer…" : "Anvend filtre"}</Button>
+            {groups.length > 0 && <Badge tone="blue">{groups.length} filtergruppe{groups.length === 1 ? "" : "r"}</Badge>}{pending && <span className="text-xs text-muted">Tællere og tabel opdateres…</span>}
           </div>
         </form>
       )}

@@ -36,16 +36,11 @@ export default async function BuilderPage({
 
   if (mode !== "legacy") {
     return (
-      <div className="space-y-3">
-        <p className="text-sm text-muted">
-          Ændringer gemmes i kladden. Publicering fastfryser en uforanderlig version.
-        </p>
-        <ModernBuilder
-          studyId={id}
-          initialTitle={data.study.title as string}
-          initialDefinition={instrumentDefinition.parse(data.study.draft_definition)}
-        />
-      </div>
+      <ModernBuilder
+        studyId={id}
+        initialTitle={data.study.title as string}
+        initialDefinition={instrumentDefinition.parse(data.study.draft_definition)}
+      />
     );
   }
 
