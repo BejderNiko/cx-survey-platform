@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { instrumentDefinition, validateInstrument, type InstrumentDefinition } from "../src/instrument";
-import { nextStep, visiblePath } from "../src/logic";
+import {
+  INCOMPLETE_LOGIC_CONDITION_MESSAGE,
+  instrumentDefinition,
+  validateInstrument,
+  type InstrumentDefinition,
+} from "../src/instrument";
+import { evaluateCondition, nextStep, visiblePath } from "../src/logic";
 
 const def: InstrumentDefinition = instrumentDefinition.parse({
   languages: ["da", "en"],
@@ -136,5 +141,58 @@ describe("survey logic engine", () => {
     bad.blocks[0].questions[2].hidden = true;
     const problems = validateInstrument(bad);
     expect(problems).toContain("Hidden question 'detractor_why' cannot have display conditions.");
+  });
+
+  it("treats legacy display conditions as show rules and lets matching hide rules win", () => {
+    const conditional = structuredClone(def);
+    conditional.blocks[0].questions[3].visibleIf = [
+      { questionCode: "nps_score", op: "eq", value: 2, effect: "hide" },
+    ];
+    expect(visiblePath(conditional, { screener: "yes", nps_score: 2 })).not.toContain("promoter_why");
+    expect(visiblePath(conditional, { screener: "yes", nps_score: 8 })).toContain("promoter_why");
+    expect(visiblePath(def, { screener: "yes", nps_score: 2 })).toContain("detractor_why");
+  });
+
+  it("matches every selected value in a multiple-choice contains condition", () => {
+    expect(evaluateCondition(
+      { questionCode: "channels", op: "contains", value: ["email", "sms"] },
+      { channels: ["email", "sms", "phone"] },
+    )).toBe(true);
+    expect(evaluateCondition(
+      { questionCode: "channels", op: "contains", value: ["email", "push"] },
+      { channels: ["email", "sms"] },
+    )).toBe(false);
+  });
+
+  it("applies display conditions and hidden state to whole sections", () => {
+    const conditional = structuredClone(def);
+    conditional.blocks.push({
+      id: "b2",
+      visibleIf: [{ questionCode: "nps_score", op: "eq", value: 10 }],
+      questions: [{ code: "section_followup", type: "long_text", label: { en: "Section follow-up" }, required: false }],
+    });
+    expect(visiblePath(conditional, { screener: "yes", nps_score: 10 })).toContain("section_followup");
+    expect(visiblePath(conditional, { screener: "yes", nps_score: 2 })).not.toContain("section_followup");
+
+    conditional.blocks[1].hidden = true;
+    expect(visiblePath(conditional, { screener: "yes", nps_score: 10 })).not.toContain("section_followup");
+  });
+
+  it("flags incomplete display conditions before save or publish", () => {
+    const bad = structuredClone(def);
+    bad.blocks[0].questions[2].visibleIf = [
+      { questionCode: "", op: "eq", value: "", effect: "show" },
+    ];
+    expect(validateInstrument(bad)).toContain(INCOMPLETE_LOGIC_CONDITION_MESSAGE);
+  });
+
+  it("requires section display conditions to reference an earlier section", () => {
+    const bad = structuredClone(def);
+    bad.blocks.push({
+      id: "b2",
+      visibleIf: [{ questionCode: "section_followup", op: "answered" }],
+      questions: [{ code: "section_followup", type: "long_text", label: { en: "Section follow-up" }, required: false }],
+    });
+    expect(validateInstrument(bad)).toContain("Display condition on 'b2' must reference an earlier question.");
   });
 });

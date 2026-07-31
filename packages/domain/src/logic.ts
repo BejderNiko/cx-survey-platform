@@ -1,5 +1,6 @@
 import {
   type Condition,
+  type Block,
   type InstrumentDefinition,
   type Question,
   allQuestions,
@@ -40,7 +41,9 @@ export function evaluateCondition(cond: Condition, answers: AnswerMap): boolean 
       return Array.isArray(value) && !value.some((v) => looseEquals(answer, v));
     case "contains":
       return Array.isArray(answer)
-        ? answer.some((a) => looseEquals(a, value))
+        ? Array.isArray(value)
+          ? value.every((expected) => answer.some((actual) => looseEquals(actual, expected)))
+          : answer.some((a) => looseEquals(a, value))
         : String(answer).includes(String(value));
     default:
       return false;
@@ -57,6 +60,15 @@ function looseEquals(a: unknown, b: unknown): boolean {
 export function conditionsHold(conds: Condition[] | undefined, answers: AnswerMap): boolean {
   if (!conds || conds.length === 0) return true;
   return conds.every((c) => evaluateCondition(c, answers));
+}
+
+/** Legacy display conditions are show rules. Hide rules take precedence when matched. */
+export function displayConditionsHold(conds: Condition[] | undefined, answers: AnswerMap): boolean {
+  if (!conds || conds.length === 0) return true;
+  const showRules = conds.filter((current) => current.effect !== "hide");
+  const hideRules = conds.filter((current) => current.effect === "hide");
+  return showRules.every((current) => evaluateCondition(current, answers))
+    && hideRules.every((current) => !evaluateCondition(current, answers));
 }
 
 export type FlowStep =
@@ -76,6 +88,10 @@ export function nextStep(
 ): FlowStep {
   const questions = allQuestions(def);
   let startIndex = 0;
+  const blocksByQuestion = new Map<string, Block>();
+  for (const currentBlock of def.blocks) {
+    for (const question of currentBlock.questions) blocksByQuestion.set(question.code, currentBlock);
+  }
   if (fromCode !== null) {
     const idx = questions.findIndex((q) => q.code === fromCode);
     if (idx === -1) return { kind: "end" };
@@ -87,19 +103,28 @@ export function nextStep(
         const target = questions.findIndex((q) => q.code === rule.goTo);
         if (target > idx) {
           startIndex = target;
-          return firstVisibleFrom(questions, startIndex, answers);
+          return firstVisibleFrom(questions, blocksByQuestion, startIndex, answers);
         }
       }
     }
     startIndex = idx + 1;
   }
-  return firstVisibleFrom(questions, startIndex, answers);
+  return firstVisibleFrom(questions, blocksByQuestion, startIndex, answers);
 }
 
-function firstVisibleFrom(questions: Question[], start: number, answers: AnswerMap): FlowStep {
+function firstVisibleFrom(
+  questions: Question[],
+  blocksByQuestion: Map<string, Block>,
+  start: number,
+  answers: AnswerMap,
+): FlowStep {
   for (let i = start; i < questions.length; i++) {
     const q = questions[i];
-    if (!q.hidden && conditionsHold(q.visibleIf, answers)) {
+    const currentBlock = blocksByQuestion.get(q.code);
+    if (!q.hidden
+      && !currentBlock?.hidden
+      && displayConditionsHold(currentBlock?.visibleIf, answers)
+      && displayConditionsHold(q.visibleIf, answers)) {
       return { kind: "question", question: q };
     }
   }

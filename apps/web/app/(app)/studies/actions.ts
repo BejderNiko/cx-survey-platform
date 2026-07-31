@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import {
   METRIC_DEFINITIONS,
+  INCOMPLETE_LOGIC_CONDITION_MESSAGE,
   allQuestions,
   instrumentDefinition,
   validateInstrument,
@@ -60,6 +61,10 @@ export async function createStudy(input: {
 
 export async function updateDraft(studyId: string, definitionRaw: unknown, titleRaw?: string) {
   const def = toDanishDraft(instrumentDefinition.parse(definitionRaw));
+  const problems = validateInstrument(def);
+  if (problems.includes(INCOMPLETE_LOGIC_CONDITION_MESSAGE)) {
+    throw new Error(INCOMPLETE_LOGIC_CONDITION_MESSAGE);
+  }
   const title = titleRaw?.trim();
   if (titleRaw !== undefined && !title) throw new Error("Studienavn skal udfyldes.");
   await withAuthorized("studies.edit", async (tx, session) => {
@@ -77,7 +82,7 @@ export async function updateDraft(studyId: string, definitionRaw: unknown, title
     if (updated.length !== 1) throw new Error("Studiet blev ikke fundet eller kan ikke redigeres.");
   });
   revalidatePath(`/studies/${studyId}`);
-  return { ok: true, problems: validateInstrument(def) };
+  return { ok: true, problems };
 }
 
 export async function publishStudy(studyId: string) {

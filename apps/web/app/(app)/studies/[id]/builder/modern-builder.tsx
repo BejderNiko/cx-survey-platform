@@ -3,8 +3,12 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition, type ReactNode } from "react";
 import {
+  INCOMPLETE_LOGIC_CONDITION_MESSAGE,
   QUESTION_TYPES,
+  isIncompleteLogicCondition,
+  lt,
   validateInstrument,
+  type Condition,
   type InstrumentDefinition,
   type Locale,
   type Question,
@@ -19,6 +23,70 @@ const OPTION_TYPES = ["single_choice", "multiple_choice", "dropdown", "likert", 
 let uid = 0;
 const nextId = (prefix: string) => `${prefix}${Date.now().toString(36)}${(uid++).toString(36)}`;
 const needsOptions = (type: string) => OPTION_TYPES.includes(type);
+
+type LogicChoice = { value: string | number | boolean; label: string };
+
+const emptyDisplayCondition = (): Condition => ({
+  questionCode: "",
+  op: "eq",
+  value: "",
+  effect: "show",
+});
+
+function displayLogicWarningCount(definition: InstrumentDefinition): number {
+  return definition.blocks.reduce((total, block) => total
+    + (block.visibleIf ?? []).filter(isIncompleteLogicCondition).length
+    + block.questions.reduce((questionTotal, question) =>
+      questionTotal + (question.visibleIf ?? []).filter(isIncompleteLogicCondition).length, 0), 0);
+}
+
+function conditionOperatorFor(question: Question | undefined): Condition["op"] {
+  return question?.type === "multiple_choice" ? "contains" : "eq";
+}
+
+function answerChoices(question: Question | undefined, locale: Locale): LogicChoice[] {
+  if (!question) return [];
+  if (["single_choice", "multiple_choice", "dropdown", "ranking"].includes(question.type)) {
+    return (question.options ?? []).map((option) => ({
+      value: option.id,
+      label: lt(option.label, locale) || option.id,
+    }));
+  }
+  if (question.type === "likert") {
+    return (question.options ?? []).map((option) => ({
+      value: option.value ?? option.id,
+      label: lt(option.label, locale) || String(option.value ?? option.id),
+    }));
+  }
+  const range = (min: number, max: number) =>
+    Array.from({ length: max - min + 1 }, (_, index) => ({ value: min + index, label: String(min + index) }));
+  if (question.type === "nps") return range(0, 10);
+  if (question.type === "csat") return range(1, 5);
+  if (question.type === "ces") return range(1, 7);
+  if (question.type === "rating") return range(question.scale?.min ?? 1, question.scale?.max ?? 5);
+  if (question.type === "consent") {
+    return [
+      { value: true, label: locale === "da" ? "Ja" : "Yes" },
+      { value: false, label: locale === "da" ? "Nej" : "No" },
+    ];
+  }
+  if (question.type === "preference_test") {
+    return (question.stimuli ?? []).map((stimulus, index) => ({
+      value: stimulus.id,
+      label: `Design ${index + 1}`,
+    }));
+  }
+  return [];
+}
+
+function encodedChoice(value: string | number | boolean): string {
+  return JSON.stringify(value);
+}
+
+function decodedChoice(value: string): string | number | boolean {
+  return JSON.parse(value) as string | number | boolean;
+}
+
 const anchorFor = (id: string) => `section-${id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 
 const QUESTION_META: Record<Question["type"], { label: string; hint: string; tone: string }> = {
@@ -87,6 +155,7 @@ export function Builder({
 
   const questions = useMemo(() => definition.blocks.flatMap((block) => block.questions), [definition]);
   const problems = useMemo(() => validateInstrument(definition), [definition]);
+  const incompleteLogicCount = useMemo(() => displayLogicWarningCount(definition), [definition]);
 
   function mutate(change: (draft: InstrumentDefinition) => void) {
     setDefinition((current) => {
@@ -104,6 +173,13 @@ export function Builder({
         const index = block.questions.findIndex((question) => question.code === code);
         if (index >= 0) block.questions[index] = { ...block.questions[index], ...patch };
       }
+    });
+  }
+
+  function updateBlock(id: string, patch: Partial<InstrumentDefinition["blocks"][number]>) {
+    mutate((draft) => {
+      const current = draft.blocks.find((block) => block.id === id);
+      if (current) Object.assign(current, patch);
     });
   }
 
@@ -153,6 +229,10 @@ export function Builder({
   }
 
   function save() {
+    if (incompleteLogicCount > 0) {
+      setSaveMessage(INCOMPLETE_LOGIC_CONDITION_MESSAGE);
+      return;
+    }
     startTransition(async () => {
       try {
         const result = await updateDraft(studyId, definition, studyTitle);
@@ -203,7 +283,11 @@ export function Builder({
         >
           Legacy editor
         </Link>
-        <Button onClick={save} disabled={pending || !dirty || !studyTitle.trim()}>
+        <Button
+          onClick={save}
+          disabled={pending || !dirty || !studyTitle.trim() || incompleteLogicCount > 0}
+          title={incompleteLogicCount > 0 ? INCOMPLETE_LOGIC_CONDITION_MESSAGE : undefined}
+        >
           <Icon name="save" /> {pending ? "Saving..." : dirty ? "Save changes" : "Saved"}
         </Button>
       </header>
@@ -246,11 +330,13 @@ export function Builder({
                   blockIndex={blockIndex}
                   locale={editingLocale}
                   allQuestions={questions}
+                  priorQuestions={definition.blocks.slice(0, blockIndex).flatMap((current) => current.questions)}
                   onTitleChange={(title) => mutate((draft) => {
                     const current = draft.blocks.find((item) => item.id === block.id);
                     if (current) current.title = title;
                   })}
                   onQuestionChange={updateQuestion}
+                  onBlockChange={(patch) => updateBlock(block.id, patch)}
                   onAddQuestion={(type) => addQuestion(block.id, type)}
                   onMoveQuestion={(index, direction) => moveQuestion(block.id, index, direction)}
                   onRemoveQuestion={removeQuestion}
@@ -305,6 +391,7 @@ function BuilderSidebar({ definition, locale }: { definition: InstrumentDefiniti
                 label={`${index + 1}. ${title}`}
                 tone={hasDesign ? "amber" : "orange"}
                 icon={hasDesign ? "image" : "question"}
+                hidden={Boolean(block.hidden)}
                 hiddenCount={hiddenCount}
                 drag
               />
@@ -324,12 +411,13 @@ function BuilderSidebar({ definition, locale }: { definition: InstrumentDefiniti
 }
 
 function SidebarLink({
-  href, label, tone, icon, hiddenCount = 0, drag = false,
+  href, label, tone, icon, hidden = false, hiddenCount = 0, drag = false,
 }: {
   href: string;
   label: string;
   tone: "slate" | "orange" | "amber";
   icon: IconName;
+  hidden?: boolean;
   hiddenCount?: number;
   drag?: boolean;
 }) {
@@ -342,7 +430,9 @@ function SidebarLink({
     <a href={href} className="group flex min-w-0 items-center gap-2 rounded-lg px-2 py-2 text-[13px] text-slate-700 hover:bg-slate-200/60 hover:text-slate-950">
       <span className={cn("grid h-5 w-5 shrink-0 place-items-center rounded", tones[tone])}><Icon name={icon} size={12} /></span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      {hiddenCount > 0 && <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold text-slate-600">{hiddenCount} skjult</span>}
+      {hidden
+        ? <span className="rounded bg-slate-700 px-1.5 py-0.5 text-[9px] font-bold text-white">skjult</span>
+        : hiddenCount > 0 && <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold text-slate-600">{hiddenCount} skjult</span>}
       {drag && <Icon name="grip" size={13} className="text-slate-400 opacity-0 group-hover:opacity-100" />}
     </a>
   );
@@ -523,7 +613,9 @@ function StudySection({
   blockIndex,
   locale,
   allQuestions,
+  priorQuestions,
   onTitleChange,
+  onBlockChange,
   onQuestionChange,
   onAddQuestion,
   onMoveQuestion,
@@ -535,7 +627,9 @@ function StudySection({
   blockIndex: number;
   locale: Locale;
   allQuestions: Question[];
+  priorQuestions: Question[];
   onTitleChange: (title: { da?: string; en?: string }) => void;
+  onBlockChange: (patch: Partial<InstrumentDefinition["blocks"][number]>) => void;
   onQuestionChange: (code: string, patch: Partial<Question>) => void;
   onAddQuestion: (type: Question["type"]) => void;
   onMoveQuestion: (index: number, direction: -1 | 1) => void;
@@ -546,6 +640,8 @@ function StudySection({
   const [newType, setNewType] = useState<Question["type"]>("single_choice");
   const hasDesign = block.questions.some((question) => question.type === "first_click");
   const title = block.title?.[locale] ?? "";
+  const hasLogic = Boolean(block.visibleIf?.length);
+  const [logicOpen, setLogicOpen] = useState(hasLogic);
   const fallbackTitle = hasDesign ? "Design survey" : "Survey questions";
   return (
     <section id={anchorFor(block.id)} className="scroll-mt-24">
@@ -553,12 +649,34 @@ function StudySection({
       <SectionHeading
         icon={hasDesign ? "image" : "question"}
         actions={
-          <details className="relative">
-            <summary className="grid h-8 w-8 cursor-pointer list-none place-items-center rounded-lg text-slate-500 hover:bg-slate-200" aria-label="Section menu"><Icon name="more" /></summary>
-            <div className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
-              <button type="button" disabled={!canRemoveSection} onClick={onRemoveSection} className="w-full rounded-md px-3 py-2 text-left text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40">Delete section</button>
-            </div>
-          </details>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (!hasLogic) onBlockChange({ visibleIf: [emptyDisplayCondition()] });
+                setLogicOpen((current) => hasLogic ? !current : true);
+              }}
+              aria-expanded={logicOpen}
+              className={cn("inline-flex h-9 items-center gap-1 rounded-md px-2 text-[10px] font-bold uppercase tracking-wide", hasLogic ? "bg-cyan-100 text-cyan-800" : "bg-slate-100 text-slate-600")}
+            >
+              <Icon name="logic" size={12} /> Logic {hasLogic ? `on - ${block.visibleIf?.length ?? 0}` : "off"}
+            </button>
+            <button
+              type="button"
+              onClick={() => onBlockChange({ hidden: !block.hidden })}
+              aria-pressed={Boolean(block.hidden)}
+              aria-label={block.hidden ? `Show section ${blockIndex + 1} to participants` : `Hide section ${blockIndex + 1} from participants`}
+              className={cn("grid h-9 w-9 place-items-center rounded-md", block.hidden ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200")}
+            >
+              <Icon name={block.hidden ? "eye-off" : "eye"} size={14} />
+            </button>
+            <details className="relative">
+              <summary className="grid h-9 w-9 cursor-pointer list-none place-items-center rounded-lg text-slate-500 hover:bg-slate-200" aria-label="Section menu"><Icon name="more" /></summary>
+              <div className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                <button type="button" disabled={!canRemoveSection} onClick={onRemoveSection} className="w-full rounded-md px-3 py-2 text-left text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40">Delete section</button>
+              </div>
+            </details>
+          </div>
         }
       >
         <span className="mr-2">{blockIndex + 1}.</span>
@@ -570,7 +688,16 @@ function StudySection({
           className="min-w-0 max-w-[70%] border-0 bg-transparent font:inherit outline-none placeholder:text-slate-950"
         />
       </SectionHeading>
-      <div className="rounded-2xl border border-[#d9dee2] bg-white p-4 shadow-[0_2px_3px_rgba(15,23,42,0.05)] sm:p-5">
+      {logicOpen && (
+        <DisplayLogicEditor
+          noun="section"
+          locale={locale}
+          conditions={block.visibleIf ?? []}
+          candidates={priorQuestions}
+          onChange={(visibleIf) => onBlockChange({ visibleIf })}
+        />
+      )}
+      <div className={cn("rounded-2xl border p-4 shadow-[0_2px_3px_rgba(15,23,42,0.05)] sm:p-5", block.hidden ? "border-dashed border-slate-300 bg-slate-50/80" : "border-[#d9dee2] bg-white")}>
         <div className="space-y-3">
           {block.questions.map((question, questionIndex) => (
             <QuestionCard
@@ -631,7 +758,7 @@ function QuestionCard({
   return (
     <article id={`question-${question.code}`} className={cn("scroll-mt-24 rounded-xl border p-4 transition-shadow focus-within:border-slate-400 focus-within:shadow-[0_4px_18px_rgba(15,23,42,0.08)]", question.hidden ? "border-dashed border-slate-300 bg-slate-50/80" : "border-[#d8dde1] bg-white")}>
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" aria-label={`Drag question ${number}`} className="cursor-grab text-slate-400 hover:text-slate-700"><Icon name="grip" /></button>
+        <button type="button" aria-label={`Drag question ${number}`} className="grid h-9 w-9 cursor-grab place-items-center rounded-md text-slate-400 hover:bg-slate-50 hover:text-slate-700"><Icon name="grip" /></button>
         <span className="text-sm font-bold text-slate-900">{number}</span>
         <Select
           aria-label={`Question ${number} type`}
@@ -650,7 +777,7 @@ function QuestionCard({
               branches: question.branches,
             });
           }}
-          className="h-7 border-0 bg-slate-50 py-0 text-xs font-medium"
+          className="h-9 border-0 bg-slate-50 py-0 text-xs font-medium"
         >
           {QUESTION_TYPES.map((type) => <option key={type} value={type}>{QUESTION_META[type].label}</option>)}
         </Select>
@@ -662,7 +789,10 @@ function QuestionCard({
           logicRuleCount={(question.visibleIf?.length ?? 0) + (question.branches?.length ?? 0)}
           logicOpen={logicOpen}
           onRequiredChange={(required) => onChange({ required })}
-          onLogicToggle={() => setLogicOpen((value) => !value)}
+          onLogicToggle={() => {
+            if (!hasLogic) onChange({ visibleIf: [emptyDisplayCondition()] });
+            setLogicOpen((current) => hasLogic ? !current : true);
+          }}
           onHiddenChange={(hidden) => onChange({ hidden })}
           onMoveUp={onMoveUp}
           onMoveDown={onMoveDown}
@@ -671,6 +801,15 @@ function QuestionCard({
           canMoveDown={canMoveDown}
         />
       </div>
+      {logicOpen && (
+        <DisplayLogicEditor
+          noun="question"
+          locale={locale}
+          conditions={question.visibleIf ?? []}
+          candidates={priorQuestions}
+          onChange={(visibleIf) => onChange({ visibleIf })}
+        />
+      )}
       <div className="mt-4">
         {question.type === "first_click" ? (
           <DesignQuestionBody question={question} locale={locale} onChange={onChange} />
@@ -678,7 +817,7 @@ function QuestionCard({
           <QuestionBody question={question} locale={locale} onChange={onChange} />
         )}
       </div>
-      <LogicEditor open={logicOpen} question={question} priorQuestions={priorQuestions} laterQuestions={laterQuestions} onChange={onChange} />
+      <LogicEditor open={logicOpen} question={question} laterQuestions={laterQuestions} onChange={onChange} />
     </article>
   );
 }
@@ -705,13 +844,15 @@ function QuestionHeaderToolbar({
 }) {
   return (
     <div className="ml-auto flex min-h-9 flex-wrap items-center justify-end gap-2">
-      <span className="text-xs leading-none text-slate-700">Required</span>
-      <Toggle checked={required} onChange={onRequiredChange} aria-label={`Question ${number} required`} />
+      <span className="inline-flex h-9 items-center gap-2 rounded-md bg-slate-50 px-2 text-xs text-slate-700">
+        Required
+        <Toggle checked={required} onChange={onRequiredChange} aria-label={`Question ${number} required`} />
+      </span>
       <button
         type="button"
         onClick={onLogicToggle}
         aria-expanded={logicOpen}
-        className={cn("inline-flex h-8 items-center gap-1 rounded-md px-2 text-[10px] font-bold uppercase tracking-wide", hasLogic ? "bg-cyan-100 text-cyan-800" : "bg-slate-100 text-slate-600")}
+        className={cn("inline-flex h-9 items-center gap-1 rounded-md px-2 text-[10px] font-bold uppercase tracking-wide", hasLogic ? "bg-cyan-100 text-cyan-800" : "bg-slate-100 text-slate-600")}
       >
         <Icon name="logic" size={12} /> Logic {hasLogic ? `on · ${logicRuleCount}` : "off"}
       </button>
@@ -721,12 +862,12 @@ function QuestionHeaderToolbar({
         aria-pressed={hidden}
         aria-label={hidden ? `Show question ${number} to participants` : `Hide question ${number} from participants`}
         title={hidden ? "Hidden from participant preview and live surveys" : "Visible to participants"}
-        className={cn("grid h-8 w-8 place-items-center rounded-md", hidden ? "bg-slate-700 text-white" : "bg-slate-50 text-slate-600 hover:bg-slate-100")}
+        className={cn("grid h-9 w-9 place-items-center rounded-md", hidden ? "bg-slate-700 text-white" : "bg-slate-50 text-slate-600 hover:bg-slate-100")}
       >
         <Icon name={hidden ? "eye-off" : "eye"} size={14} />
       </button>
       <details className="relative">
-        <summary className="grid h-8 w-8 cursor-pointer list-none place-items-center rounded-md bg-slate-50 text-slate-600 hover:bg-slate-100" aria-label={`Question ${number} menu`}><Icon name="more" size={14} /></summary>
+        <summary className="grid h-9 w-9 cursor-pointer list-none place-items-center rounded-md bg-slate-50 text-slate-600 hover:bg-slate-100" aria-label={`Question ${number} menu`}><Icon name="more" size={14} /></summary>
         <div className="absolute right-0 z-20 mt-1 w-40 rounded-lg border border-slate-200 bg-white p-1 text-xs shadow-lg">
           <button type="button" disabled={!canMoveUp} onClick={onMoveUp} className="w-full rounded-md px-3 py-2 text-left hover:bg-slate-50 disabled:opacity-40">Move up</button>
           <button type="button" disabled={!canMoveDown} onClick={onMoveDown} className="w-full rounded-md px-3 py-2 text-left hover:bg-slate-50 disabled:opacity-40">Move down</button>
@@ -919,11 +1060,10 @@ function MatrixEditor({ question, locale, onChange }: { question: Question; loca
 }
 
 function LogicEditor({
-  open, question, priorQuestions, laterQuestions, onChange,
+  open, question, laterQuestions, onChange,
 }: {
   open: boolean;
   question: Question;
-  priorQuestions: Question[];
   laterQuestions: Question[];
   onChange: (patch: Partial<Question>) => void;
 }) {
@@ -935,11 +1075,7 @@ function LogicEditor({
         Logic rules
         <span className="ml-auto text-[11px] font-normal text-slate-500">Display conditions and answer routing</span>
       </div>
-      <div className="grid gap-4 rounded-lg bg-slate-50 p-3 xl:grid-cols-2">
-        <div>
-          <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">Show this question if</p>
-          <ConditionRows conditions={question.visibleIf ?? []} candidates={priorQuestions} onChange={(visibleIf) => onChange({ visibleIf })} />
-        </div>
+      <div className="rounded-lg bg-slate-50 p-3">
         <div>
           <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">After answering, jump</p>
           <div className="space-y-2">
@@ -981,49 +1117,186 @@ function LogicEditor({
   );
 }
 
-function ConditionRows({
-  conditions, candidates, onChange,
+function DisplayLogicEditor({
+  noun, locale, conditions, candidates, onChange,
 }: {
-  conditions: NonNullable<Question["visibleIf"]>;
+  noun: "question" | "section";
+  locale: Locale;
+  conditions: Condition[];
   candidates: Question[];
-  onChange: (conditions: NonNullable<Question["visibleIf"]>) => void;
+  onChange: (conditions: Condition[]) => void;
 }) {
   return (
-    <div>
-      <div className="space-y-2">
-        {conditions.map((condition, index) => (
-          <div key={`${condition.questionCode}-${index}`} className="flex flex-wrap gap-2">
-            <Select aria-label="Condition question" value={condition.questionCode} onChange={(event) => {
-              const next = structuredClone(conditions);
-              next[index].questionCode = event.target.value;
-              onChange(next);
-            }} className="h-8 min-w-36 flex-1 text-xs">
-              {candidates.map((candidate) => <option key={candidate.code} value={candidate.code}>{candidate.code}</option>)}
-            </Select>
-            <Select aria-label="Condition operator" value={condition.op} onChange={(event) => {
-              const next = structuredClone(conditions);
-              next[index].op = event.target.value as typeof condition.op;
-              onChange(next);
-            }} className="h-8 text-xs">
-              {CONDITION_OPS.map((operator) => <option key={operator} value={operator}>{operator}</option>)}
-            </Select>
-            <Input aria-label="Condition value" value={String(condition.value ?? "")} disabled={condition.op === "answered"} onChange={(event) => {
-              const next = structuredClone(conditions);
-              const raw = event.target.value;
-              const numeric = Number(raw);
-              next[index].value = raw !== "" && !Number.isNaN(numeric) ? numeric : raw;
-              onChange(next);
-            }} className="h-8 min-w-24 flex-1 text-xs" />
-            <button type="button" aria-label="Delete condition" onClick={() => onChange(conditions.filter((_, itemIndex) => itemIndex !== index))} className="text-slate-400 hover:text-red-700"><Icon name="trash" size={14} /></button>
-          </div>
-        ))}
+    <div className={cn(noun === "section" ? "mb-4 rounded-xl border border-cyan-200 bg-cyan-50/60 p-3" : "mt-3")}>
+      <div className="space-y-3">
+        {conditions.map((condition, index) => {
+          const target = candidates.find((candidate) => candidate.code === condition.questionCode);
+          const operator = conditionOperatorFor(target);
+          return (
+            <div key={index} className="rounded-lg border border-slate-200 bg-white p-3">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                <Select
+                  aria-label={`Show or hide ${noun}`}
+                  value={condition.effect ?? "show"}
+                  onChange={(event) => {
+                    const next = structuredClone(conditions);
+                    next[index].effect = event.target.value as "show" | "hide";
+                    onChange(next);
+                  }}
+                  className="h-9 w-20 text-xs font-semibold"
+                >
+                  <option value="show">Show</option>
+                  <option value="hide">Hide</option>
+                </Select>
+                <span>this {noun} if</span>
+                <Select
+                  aria-label="Target question"
+                  value={condition.questionCode}
+                  onChange={(event) => {
+                    const next = structuredClone(conditions);
+                    const selected = candidates.find((candidate) => candidate.code === event.target.value);
+                    next[index].questionCode = event.target.value;
+                    next[index].op = conditionOperatorFor(selected);
+                    next[index].value = selected?.type === "multiple_choice" ? [] : "";
+                    onChange(next);
+                  }}
+                  className="h-9 min-w-56 flex-1 text-xs"
+                >
+                  <option value="">Select a previous question</option>
+                  {candidates.map((candidate) => (
+                    <option key={candidate.code} value={candidate.code}>
+                      {lt(candidate.label, locale) || candidate.code}
+                    </option>
+                  ))}
+                </Select>
+                <span className="font-medium text-slate-700">answer {operator === "contains" ? "contains" : "is"}</span>
+                <AnswerValueControl
+                  target={target}
+                  locale={locale}
+                  value={condition.value}
+                  onChange={(value) => {
+                    const next = structuredClone(conditions);
+                    next[index].op = operator;
+                    next[index].value = value;
+                    onChange(next);
+                  }}
+                />
+                <button
+                  type="button"
+                  aria-label="Delete condition"
+                  onClick={() => onChange(conditions.filter((_, itemIndex) => itemIndex !== index))}
+                  className="grid h-9 w-9 place-items-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-700"
+                >
+                  <Icon name="trash" size={14} />
+                </button>
+              </div>
+              {isIncompleteLogicCondition(condition) && (
+                <p className="mt-2 text-xs font-medium text-orange-700">{INCOMPLETE_LOGIC_CONDITION_MESSAGE}</p>
+              )}
+            </div>
+          );
+        })}
       </div>
-      {candidates.length > 0 ? (
-        <Button size="sm" variant="secondary" className="mt-2" onClick={() => onChange([...conditions, { questionCode: candidates[0].code, op: "eq", value: "" }])}>Add display condition</Button>
-      ) : (
-        <p className="text-[11px] text-slate-500">Add an earlier question before creating a display condition.</p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <Button size="sm" variant="secondary" onClick={() => onChange([...conditions, emptyDisplayCondition()])}>
+          Add another condition
+        </Button>
+        {conditions.length > 0 && (
+          <button type="button" onClick={() => onChange([])} className="text-xs font-medium text-slate-500 hover:text-red-700">
+            Turn display logic off
+          </button>
+        )}
+      </div>
+      {candidates.length === 0 && (
+        <p className="mt-2 text-[11px] text-slate-500">Logic needs a question placed earlier in the survey.</p>
       )}
     </div>
+  );
+}
+
+function AnswerValueControl({
+  target, locale, value, onChange,
+}: {
+  target: Question | undefined;
+  locale: Locale;
+  value: unknown;
+  onChange: (value: unknown) => void;
+}) {
+  const choices = answerChoices(target, locale);
+  if (target?.type === "multiple_choice" && choices.length > 0) {
+    return <MultipleAnswerChoice value={value} choices={choices} onChange={onChange} />;
+  }
+  if (choices.length > 0) {
+    const selected = choices.some((choice) => encodedChoice(choice.value) === encodedChoice(value as string | number | boolean))
+      ? encodedChoice(value as string | number | boolean)
+      : "";
+    return (
+      <Select
+        aria-label="Answer"
+        value={selected}
+        onChange={(event) => onChange(event.target.value === "" ? "" : decodedChoice(event.target.value))}
+        className="h-9 min-w-44 flex-1 text-xs"
+      >
+        <option value="">Select an answer</option>
+        {choices.map((choice) => <option key={encodedChoice(choice.value)} value={encodedChoice(choice.value)}>{choice.label}</option>)}
+      </Select>
+    );
+  }
+  return (
+    <Input
+      aria-label="Answer"
+      type={target?.type === "number" ? "number" : target?.type === "date" ? "date" : "text"}
+      value={value === undefined || value === null ? "" : String(value)}
+      disabled={!target}
+      placeholder={target ? "Enter an answer" : "Select target first"}
+      onChange={(event) => {
+        const raw = event.target.value;
+        onChange(target?.type === "number" && raw !== "" ? Number(raw) : raw);
+      }}
+      className="h-9 min-w-44 flex-1 text-xs"
+    />
+  );
+}
+
+function MultipleAnswerChoice({
+  value, choices, onChange,
+}: {
+  value: unknown;
+  choices: LogicChoice[];
+  onChange: (value: unknown) => void;
+}) {
+  const selected = Array.isArray(value) ? value : value === undefined || value === "" ? [] : [value];
+  const selectedChoices = choices.filter((choice) =>
+    selected.some((current) => encodedChoice(current as string | number | boolean) === encodedChoice(choice.value)));
+  const summary = selectedChoices.length === 0
+    ? "Select an answer"
+    : selectedChoices.length === 1
+      ? selectedChoices[0].label
+      : `${selectedChoices[0].label} + ${selectedChoices.length - 1} others`;
+  return (
+    <details className="relative min-w-52 flex-1">
+      <summary className="flex h-9 cursor-pointer list-none items-center rounded-md border border-slate-200 bg-white px-3 text-xs text-slate-700">
+        <span className="truncate">{summary}</span>
+      </summary>
+      <div className="absolute left-0 z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+        {choices.map((choice) => {
+          const checked = selected.some((current) =>
+            encodedChoice(current as string | number | boolean) === encodedChoice(choice.value));
+          return (
+            <label key={encodedChoice(choice.value)} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-slate-50">
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => onChange(checked
+                  ? selected.filter((current) => encodedChoice(current as string | number | boolean) !== encodedChoice(choice.value))
+                  : [...selected, choice.value])}
+              />
+              {choice.label}
+            </label>
+          );
+        })}
+      </div>
+    </details>
   );
 }
 

@@ -59,6 +59,7 @@ export type ConditionOp = z.infer<typeof conditionOp>;
 export const condition = z.object({
   questionCode: z.string(),
   op: conditionOp,
+  effect: z.enum(["show", "hide"]).optional(), // display logic; omitted means legacy "show"
   // string | number | boolean | array of those; unused for (not_)answered
   value: z.unknown().optional(),
 });
@@ -118,6 +119,8 @@ export type Question = z.infer<typeof question>;
 export const block = z.object({
   id: z.string(),
   title: localizedText.optional(),
+  hidden: z.boolean().optional(),
+  visibleIf: z.array(condition).optional(),
   questions: z.array(question),
   contextOverride: stimulusAsset.nullable().optional(), // reserved block-level override; undefined inherits
 });
@@ -147,6 +150,16 @@ export function allQuestions(def: InstrumentDefinition): Question[] {
   return def.blocks.flatMap((b) => b.questions);
 }
 
+export const INCOMPLETE_LOGIC_CONDITION_MESSAGE =
+  "This logic condition is missing a target question and an answer and must be fixed before the test can be saved.";
+
+export function isIncompleteLogicCondition(current: Condition): boolean {
+  const answerNotNeeded = current.op === "answered" || current.op === "not_answered";
+  const valueMissing = current.value === undefined
+    || current.value === ""
+    || (Array.isArray(current.value) && current.value.length === 0);
+  return current.questionCode.trim() === "" || (!answerNotNeeded && valueMissing);
+}
 /** Validation used by the builder and by publish. Returns human-readable problems. */
 
 /** Convert a mutable draft to Danish authoring while leaving published snapshots untouched. */
@@ -224,7 +237,38 @@ export function validateInstrument(def: InstrumentDefinition): string[] {
     }
   }
   const order = qs.map((q) => q.code);
-  const hiddenCodes = new Set(qs.filter((q) => q.hidden).map((q) => q.code));
+  const hiddenCodes = new Set(def.blocks.flatMap((currentBlock) =>
+    currentBlock.questions.filter((q) => currentBlock.hidden || q.hidden).map((q) => q.code)));
+
+  const validateDisplayCondition = (
+    current: Condition,
+    owner: string,
+    ownerStartIndex: number,
+  ) => {
+    if (isIncompleteLogicCondition(current)) {
+      problems.push(INCOMPLETE_LOGIC_CONDITION_MESSAGE);
+      return;
+    }
+    if (!codes.has(current.questionCode)) {
+      problems.push(`Display condition on '${owner}' references unknown question '${current.questionCode}'.`);
+    } else if (hiddenCodes.has(current.questionCode)) {
+      problems.push(`Display condition on '${owner}' cannot reference hidden question '${current.questionCode}'.`);
+    } else if (order.indexOf(current.questionCode) >= ownerStartIndex) {
+      problems.push(`Display condition on '${owner}' must reference an earlier question.`);
+    }
+  };
+
+  let blockStartIndex = 0;
+  for (const currentBlock of def.blocks) {
+    if (currentBlock.hidden && currentBlock.visibleIf?.length) {
+      problems.push(`Hidden section '${currentBlock.id}' cannot have display conditions.`);
+    }
+    for (const current of currentBlock.visibleIf ?? []) {
+      validateDisplayCondition(current, currentBlock.id, blockStartIndex);
+    }
+    blockStartIndex += currentBlock.questions.length;
+  }
+
   for (const q of qs) {
     if (q.hidden && q.visibleIf?.length) {
       problems.push(`Hidden question '${q.code}' cannot have display conditions.`);
@@ -253,13 +297,7 @@ export function validateInstrument(def: InstrumentDefinition): string[] {
       }
     }
     for (const c of q.visibleIf ?? []) {
-      if (!codes.has(c.questionCode)) {
-        problems.push(`Display condition on '${q.code}' references unknown question '${c.questionCode}'.`);
-      } else if (hiddenCodes.has(c.questionCode)) {
-        problems.push(`Display condition on '${q.code}' cannot reference hidden question '${c.questionCode}'.`);
-      } else if (order.indexOf(c.questionCode) >= order.indexOf(q.code)) {
-        problems.push(`Display condition on '${q.code}' must reference an earlier question.`);
-      }
+      validateDisplayCondition(c, q.code, order.indexOf(q.code));
     }
   }
   return problems;
