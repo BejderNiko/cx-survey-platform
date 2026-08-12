@@ -26,6 +26,7 @@
   "devDependencies": {
     "@electric-sql/pglite": "0.4.5",
     "@electric-sql/pglite-socket": "0.1.5",
+    "supabase": "^2.110.0",
     "turbo": "^2.5.8",
     "typescript": "^5"
   }

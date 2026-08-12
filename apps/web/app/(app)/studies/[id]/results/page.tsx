@@ -15,9 +15,23 @@ import { requireSession } from "@/lib/auth";
 import { withUser } from "@/lib/db";
 import { fmtDateTime, fmtNumber } from "@/lib/format";
 import { CHANNEL, QUESTION_TYPE, RESPONSE_STATUS, label } from "@/lib/labels";
+import { ResultsDashboard } from "./results-dashboard";
 
 /** Resultat-fanen: aggregerede resultater pr. spørgsmål + individuelle besvarelser. */
-export default async function ResultsPage({
+export default async function ResultsPageV2({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ filters?: string; ask?: string }>;
+}) {
+  const { id } = await params;
+  const search = await searchParams;
+  return <ResultsDashboard studyId={id} search={search} />;
+}
+
+/** Historical renderer retained temporarily for comparison during Preview QA. */
+export async function LegacyResultsPage({
   params,
   searchParams,
 }: {

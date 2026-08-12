@@ -6,7 +6,7 @@ import { segmentDefinition } from "@ok/domain";
 import { withAuthorized } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { env } from "@/lib/env";
-import { resolveAudience } from "@/lib/data/panel";
+import { parsePanelFilters, resolveAudience } from "@/lib/data/panel";
 
 function token(prefix: string): string {
   return `${prefix}_${randomBytes(12).toString("base64url")}`;
@@ -43,6 +43,7 @@ export interface InviteInput {
   method: "all" | "random";
   sampleSize?: number;
   seed?: number;
+  filters?: string;
 }
 
 /**
@@ -68,6 +69,10 @@ export async function createPanelInvite(input: InviteInput) {
         where id = ${input.segmentId} and org_id = ${session.orgId}`;
       if (seg) segment = segmentDefinition.parse(seg.definition);
     }
+    const filters = parsePanelFilters(input.filters);
+    if (input.filters && input.filters !== "[]" && filters.length === 0) {
+      throw new Error("Panel filters are invalid or incomplete.");
+    }
     // Målgruppen afgøres over hele populationen; kontaktloft anvendes efter
     // fuld egnethedsvurdering, og hårde grænser fejler frem for at afkorte (F5-003).
     const { candidates, eligible, excluded, selected, seed, governance } = await resolveAudience(tx, {
@@ -75,6 +80,7 @@ export async function createPanelInvite(input: InviteInput) {
       segment,
       method: input.method,
       sampleSize: input.sampleSize,
+      filters,
       seed: input.seed,
     });
 
@@ -89,6 +95,7 @@ export async function createPanelInvite(input: InviteInput) {
                 requested: input.sampleSize ?? selected.length,
                 candidates: candidates.length, eligible: eligible.length,
                 excluded: exclusionSummary, panelistIds: selected,
+                filters, filterVersion: 1,
                 segmentId: input.segmentId ?? null, governance,
               } as never)},
               ${session.userId})
@@ -119,7 +126,7 @@ export async function createPanelInvite(input: InviteInput) {
     await audit(tx, {
       orgId: session.orgId, actorUserId: session.userId,
       action: "distribution.create", entityType: "distribution", entityId: dist.id as string,
-      details: { kind: "panel_invite", invited: panelists.length, excluded: exclusionSummary, seed },
+      details: { kind: "panel_invite", invited: panelists.length, excluded: exclusionSummary, seed, filters },
     });
     return { invited: panelists.length, excluded: exclusionSummary, eligible: eligible.length, candidates: candidates.length };
   });

@@ -1,5 +1,6 @@
 import { getSession } from "@/lib/auth";
 import { adminSql, withUser } from "@/lib/db";
+import { draftDefinitionHash, verifyDraftPreviewToken } from "@/lib/preview-token";
 import { getStimulusObject } from "@/lib/stimulus-storage";
 
 export const dynamic = "force-dynamic";
@@ -21,8 +22,22 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     });
   } else {
     const token = new URL(request.url).searchParams.get("token") ?? "";
-    if (!token || token.length > 200) return new Response("Not found", { status: 404 });
-    const [row] = await adminSql`
+    if (!token || token.length > 1_000) return new Response("Not found", { status: 404 });
+    const preview = await verifyDraftPreviewToken(token);
+    if (preview) {
+      const [row] = await adminSql`
+        select m.storage_key, m.content_type, s.draft_definition
+        from media_assets m
+        join studies s on s.id = m.study_id and s.org_id = m.org_id
+        where m.id = ${id} and m.study_id = ${preview.studyId} and m.org_id = ${preview.orgId}
+          and jsonb_path_exists(s.draft_definition, '$.**.assetId ? (@ == $asset)',
+                jsonb_build_object('asset', to_jsonb(m.id::text)))`;
+      if (row && draftDefinitionHash(row.draft_definition) === preview.draftHash) {
+        asset = { storage_key: String(row.storage_key), content_type: String(row.content_type) };
+      }
+    }
+    if (!asset) {
+      const [row] = await adminSql`
       select m.storage_key, m.content_type
       from media_assets m
       join studies s on s.id = m.study_id and s.org_id = m.org_id
@@ -47,7 +62,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
                     jsonb_build_object('asset', to_jsonb(m.id::text)))
           )
         )`;
-    asset = row ? { storage_key: String(row.storage_key), content_type: String(row.content_type) } : null;
+      asset = row ? { storage_key: String(row.storage_key), content_type: String(row.content_type) } : null;
+    }
   }
 
   if (!asset) return new Response("Not found", { status: 404 });

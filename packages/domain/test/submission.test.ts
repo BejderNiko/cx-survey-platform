@@ -50,6 +50,21 @@ describe("respondent submission validation", () => {
     if (result.ok) expect(result.value.answers.map((a) => a.code)).toEqual(["nps_score", "contact"]);
   });
 
+  it("does not require a question hidden from participants", () => {
+    const hidden = structuredClone(definition);
+    hidden.blocks[0].questions[1].hidden = true;
+    const result = validateSubmission(hidden, {
+      status: "completed",
+      answers: [
+        { code: "nps_score", type: "nps", value: 3 },
+        { code: "contact", type: "consent", value: false },
+      ],
+      interactions: [],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.answers.map((answer) => answer.code)).toEqual(["nps_score", "contact"]);
+  });
+
   it("rejects missing required answers", () => {
     const result = validateSubmission(definition, {
       status: "completed",

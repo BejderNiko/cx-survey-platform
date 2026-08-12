@@ -34,6 +34,7 @@ export const QUESTION_TYPE_METADATA: Record<QuestionType, QuestionTypeMetadata> 
   ranking: { type: "ranking", group: "Matrix/rangering", name: "Rangering", description: "Prioriterer alle muligheder.", example: "Rangér forbedringer efter betydning.", respondentAction: "Flytter muligheder til ønsket rækkefølge.", resultMeasure: "Placering og gennemsnitlig rang." },
   first_click: { type: "first_click", group: "Research tests", name: "Første klik", description: "Måler første klik på et billede.", example: "Hvor ville du klikke for at betale?", respondentAction: "Klikker ét sted på billedet.", resultMeasure: "Klikposition, klikfordeling og tid til klik." },
   preference_test: { type: "preference_test", group: "Research tests", name: "Præferencetest", description: "Sammenligner 2–8 billeder.", example: "Hvilket design foretrækker du?", respondentAction: "Vælger præcis ét billede.", resultMeasure: "Valg og andel pr. billede." },
+  prototype_test: { type: "prototype_test", group: "Research tests", name: "Figma prototype", description: "Tracks navigation and clicks in a Figma prototype.", example: "Find and complete payment in the prototype.", respondentAction: "Consents to telemetry and uses the embedded prototype.", resultMeasure: "Frame sequence, goal completion, time, clicks and misclicks." },
 };
 
 export function groupedQuestionTypes(): { group: QuestionTypeGroup; items: QuestionTypeMetadata[] }[] {

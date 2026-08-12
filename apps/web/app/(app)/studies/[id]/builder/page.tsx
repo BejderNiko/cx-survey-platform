@@ -2,10 +2,19 @@ import { notFound } from "next/navigation";
 import { assertCan, can, instrumentDefinition } from "@ok/domain";
 import { requireSession } from "@/lib/auth";
 import { withUser } from "@/lib/db";
+import { env } from "@/lib/env";
+import { issueDraftPreviewToken } from "@/lib/preview-token";
 import { Builder } from "./builder";
+import { Builder as ModernBuilder } from "./modern-builder";
 import type { StudyCommentRow } from "../comments-panel";
 
-export default async function BuilderPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function BuilderPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ mode?: string }>;
+}) {
   const session = await requireSession();
   assertCan(session.role, "studies.edit");
   const { id } = await params;
@@ -24,6 +33,24 @@ export default async function BuilderPage({ params }: { params: Promise<{ id: st
     return { study, comments };
   });
   if (!data) notFound();
+
+  const { mode } = await searchParams;
+
+  if (mode !== "legacy") {
+    const previewToken = await issueDraftPreviewToken({
+      studyId: id,
+      orgId: session.orgId,
+      definition: data.study.draft_definition,
+    });
+    return (
+      <ModernBuilder
+        studyId={id}
+        initialTitle={data.study.title as string}
+        initialDefinition={instrumentDefinition.parse(data.study.draft_definition)}
+        previewUrl={`${env.appBaseUrl}/p/${previewToken}`}
+      />
+    );
+  }
 
   return (
     <div className="space-y-3">

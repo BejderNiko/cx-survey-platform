@@ -51,6 +51,11 @@ export const ACTIONS = [
   // collaboration
   "comments.create",
   "comments.resolve",
+  // internal product workflow and reporting (owner/administrator only by default)
+  "feature_requests.view",
+  "feature_requests.create",
+  "feature_requests.manage",
+  "reports.create",
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 

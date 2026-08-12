@@ -109,8 +109,18 @@ export function validateSubmission(
   const interactionCodes = new Set<string>();
   for (const interaction of input.interactions) {
     const question = questions.get(interaction.code);
-    if (!question || question.type !== "first_click" || !pathCodes.has(interaction.code)) {
+    if (!question || !pathCodes.has(interaction.code)) {
       errors.push(`Interaction for '${interaction.code}' is not allowed on this survey path.`);
+      continue;
+    }
+    if (question.type === "prototype_test") {
+      const problem = validatePrototypeInteraction(interaction);
+      if (problem) errors.push(`Interaction for '${interaction.code}': ${problem}`);
+      else interactions.push(interaction);
+      continue;
+    }
+    if (question.type !== "first_click") {
+      errors.push(`Interaction for '${interaction.code}' is not supported for '${question.type}'.`);
       continue;
     }
     if (interaction.eventType !== "first_click") {
@@ -133,6 +143,18 @@ export function validateSubmission(
   for (const answer of answers) {
     if (answer.type === "first_click" && !interactionCodes.has(answer.code)) {
       errors.push(`First-click answer '${answer.code}' is missing its interaction metadata.`);
+    }
+    if (answer.type === "prototype_test") {
+      const currentQuestion = questions.get(answer.code);
+      const currentAnswer = answer.value as Record<string, unknown>;
+      const frames = interactions.filter((entry) => entry.code === answer.code && entry.eventType === "prototype_frame");
+      if (frames.length === 0) errors.push(`Prototype answer '${answer.code}' is missing frame telemetry.`);
+      if (currentAnswer.reachedGoal === true) {
+        const goal = currentQuestion?.prototype?.goalFrameId;
+        if (!goal || !frames.some((entry) => entry.payload.frameId === goal)) {
+          errors.push(`Prototype answer '${answer.code}' claims success without a matching goal-frame event.`);
+        }
+      }
     }
   }
 
@@ -220,6 +242,14 @@ function validateAnswerValue(question: Question, value: unknown): string | null 
       }
       return order.every((id) => allowed.has(id)) ? null : "display order contains an unknown stimulus.";
     }
+    case "prototype_test": {
+      if (!isPlainObject(value)) return "must contain prototype completion state.";
+      if (typeof value.reachedGoal !== "boolean") return "must include reachedGoal.";
+      if (value.lastFrameId !== null && (typeof value.lastFrameId !== "string" || value.lastFrameId.length > 200)) {
+        return "lastFrameId must be null or a bounded string.";
+      }
+      return null;
+    }
   }
 }
 
@@ -275,4 +305,43 @@ function validateFirstClickPayload(
     return "coordinates must match the submitted first-click answer.";
   }
   return nonNegativeNumber(payload.elapsedMs) ? null : "elapsedMs must be a non-negative number.";
+}
+
+function boundedId(value: unknown): boolean {
+  return typeof value === "string" && value.length > 0 && value.length <= 200;
+}
+
+function validatePrototypeInteraction(interaction: SubmittedInteraction): string | null {
+  const payload = interaction.payload;
+  if (interaction.eventType === "prototype_frame") {
+    const allowed = new Set(["frameId", "previousFrameId", "elapsedMs", "initial"]);
+    if (Object.keys(payload).some((key) => !allowed.has(key))) return "frame event contains unsupported fields.";
+    if (!boundedId(payload.frameId)) return "frameId is invalid.";
+    if (payload.previousFrameId !== null && payload.previousFrameId !== undefined && !boundedId(payload.previousFrameId)) {
+      return "previousFrameId is invalid.";
+    }
+    if (!nonNegativeNumber(payload.elapsedMs)) return "elapsedMs must be non-negative.";
+    return payload.initial === undefined || typeof payload.initial === "boolean" ? null : "initial must be boolean.";
+  }
+  if (interaction.eventType === "prototype_click") {
+    const allowed = new Set(["frameId", "x", "y", "isMisclick", "targetNodeId", "scrollingFrameId", "elapsedMs"]);
+    if (Object.keys(payload).some((key) => !allowed.has(key))) return "click event contains unsupported fields.";
+    if (!boundedId(payload.frameId) || !nonNegativeNumber(payload.x) || !nonNegativeNumber(payload.y)) {
+      return "click frameId/x/y are invalid.";
+    }
+    if (typeof payload.isMisclick !== "boolean" || !nonNegativeNumber(payload.elapsedMs)) {
+      return "click status or elapsedMs is invalid.";
+    }
+    for (const key of ["targetNodeId", "scrollingFrameId"] as const) {
+      if (payload[key] !== null && payload[key] !== undefined && !boundedId(payload[key])) return `${key} is invalid.`;
+    }
+    return null;
+  }
+  if (interaction.eventType === "prototype_status") {
+    const allowed = new Set(["status", "elapsedMs"]);
+    if (Object.keys(payload).some((key) => !allowed.has(key))) return "status event contains unsupported fields.";
+    if (!["LOGIN_SCREEN_SHOWN", "PASSWORD_SCREEN_SHOWN"].includes(String(payload.status))) return "status is invalid.";
+    return nonNegativeNumber(payload.elapsedMs) ? null : "elapsedMs must be non-negative.";
+  }
+  return `event '${interaction.eventType}' is not supported.`;
 }

@@ -17,6 +17,7 @@ export const TARGET_FIELDS = [
   "country",
   "customer_status",
   "recruitment_source",
+  "tags",
 ] as const;
 export type TargetField = (typeof TARGET_FIELDS)[number];
 
@@ -29,6 +30,8 @@ export interface NormalizedRow {
   rowNumber: number;
   fields: Partial<Record<TargetField, string | number | null>>;
   attributes: Record<string, string>;
+  /** Undefined means no Tags column was mapped; [] means mapped but empty. */
+  tags?: string[];
 }
 
 export interface RowError {
@@ -45,6 +48,15 @@ export interface ValidationResult {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/** XLSX/CSV convention: one cell can contain several tags. */
+export function parseTags(value: string): string[] {
+  const unique = new Map<string, string>();
+  for (const raw of value.split(/[,;|\n]/)) {
+    const tag = raw.trim().toLowerCase();
+    if (tag && !unique.has(tag)) unique.set(tag, tag);
+  }
+  return [...unique.values()];
+}
 export function validateRows(
   rows: Record<string, string>[],
   mapping: ImportMapping,
@@ -72,6 +84,7 @@ export function validateRows(
     const rowNumber = idx + 2; // header is row 1
     const fields: NormalizedRow["fields"] = {};
     const attributes: Record<string, string> = {};
+    let tags: string[] | undefined;
     const rowErrors: RowError[] = [];
 
     for (const [column, target] of Object.entries(mapping)) {
@@ -82,6 +95,10 @@ export function validateRows(
         continue;
       }
       const field = target as TargetField;
+      if (field === "tags") {
+        tags = parseTags(value);
+        continue;
+      }
       if (value === "") {
         fields[field] = null;
         continue;
@@ -137,7 +154,7 @@ export function validateRows(
     if (rowErrors.length > 0) {
       errors.push(...rowErrors);
     } else {
-      valid.push({ rowNumber, fields, attributes });
+      valid.push({ rowNumber, fields, attributes, ...(tags === undefined ? {} : { tags }) });
     }
   });
 

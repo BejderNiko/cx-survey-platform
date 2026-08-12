@@ -9,6 +9,7 @@ const dict = {
   nav_panel: "Panel",
   nav_studies: "Studier",
   nav_analytics: "Analyse",
+  nav_feature_requests: "Feature requests",
   nav_admin: "Administration",
   sign_out: "Log ud",
   search: "Søg",

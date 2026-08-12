@@ -33,6 +33,29 @@ export default async function PanelistProfilePage({ params }: { params: Promise<
         actions={<Link href="/panel" className="text-sm text-accent hover:underline">← Panel</Link>}
       />
 
+      <Card>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {[
+            ["Gender", p.gender ?? "—"],
+            ["Age", profile.attributes.find((attribute) => attribute.key === "age")?.value ?? "—"],
+            ["Zip", p.postal_code ?? "—"],
+            ["Country", p.country ?? "—"],
+            ["Tests taken", profile.attributes.find((attribute) => attribute.key === "tests_completed")?.value ?? "—"],
+            ["Last test taken", profile.attributes.find((attribute) => attribute.key === "last_test_date")?.value ?? "—"],
+            ["Joined", fmtDate(p.created_at)],
+            ["Devices", "—"],
+          ].map(([key, value]) => (
+            <div key={String(key)} className="rounded-lg border border-line/70 bg-surface px-3 py-2">
+              <p className="text-[11px] uppercase tracking-wide text-muted">{key}</p>
+              <p className="mt-1 text-sm font-medium text-heading">{Array.isArray(value) ? value.join(", ") : String(value)}</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted">Tags</span>
+          {profile.tags.length > 0 ? profile.tags.map((tag) => <Badge key={String(tag.id)} tone="blue">{String(tag.name)}</Badge>) : <span className="text-sm text-muted">—</span>}
+        </div>
+      </Card>
       <div className="grid gap-4 lg:grid-cols-3">
         <Card title="Identitet og kontakt">
           <dl className="space-y-1.5 text-sm">
@@ -63,7 +86,7 @@ export default async function PanelistProfilePage({ params }: { params: Promise<
           </dl>
         </Card>
 
-        <Card title="Profilattributter">
+        <Card title="Panel Questions">
           {profile.attributes.length === 0 ? (
             <p className="text-sm text-muted">Ingen brugerdefinerede attributter.</p>
           ) : (

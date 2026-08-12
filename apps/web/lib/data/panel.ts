@@ -2,6 +2,90 @@ import { randomSample, type SegmentDefinition, type SegmentFilter } from "@ok/do
 import type { Tx } from "../db";
 
 /** Panel data access: list/filter/segment SQL, profile, governance checks. */
+export const PANEL_FILTER_FIELDS = [
+  "uddannelse",
+  "opvarmningskilde",
+  "tag",
+  "message_open",
+  "custom",
+  "customer_status",
+  "age",
+] as const;
+export type PanelFilterField = (typeof PANEL_FILTER_FIELDS)[number];
+export interface PanelFilterGroup {
+  field: PanelFilterField;
+  operator: "any" | "all" | "none";
+  values: string[];
+  key?: string;
+}
+
+const PANEL_FILTER_FIELD_SET = new Set<string>(PANEL_FILTER_FIELDS);
+const PANEL_FILTER_OPERATORS = new Set(["any", "all", "none"]);
+
+/**
+ * Imported multi-select answers currently arrive as comma/semicolon-delimited
+ * text. Normalize them into stable individual filter choices and deduplicate
+ * case-insensitively while preserving the first display spelling.
+ */
+export function panelFilterOptionValues(...sources: unknown[]): string[] {
+  const unique = new Map<string, string>();
+  for (const source of sources) {
+    const values = Array.isArray(source) ? source : [source];
+    for (const value of values) {
+      if (!["string", "number", "boolean"].includes(typeof value)) continue;
+      for (const part of String(value).split(/[;,]/u)) {
+        const option = part.trim();
+        if (!option) continue;
+        const key = option.normalize("NFC").toLocaleLowerCase("da");
+        if (!unique.has(key)) unique.set(key, option);
+      }
+    }
+  }
+  return [...unique.values()];
+}
+
+/**
+ * Parse the URL representation shared by the Panel page and audience flows.
+ * Invalid groups are rejected instead of reaching SQL with ambiguous values.
+ */
+export function parsePanelFilters(raw: string | undefined): PanelFilterGroup[] {
+  if (!raw || raw.length > 20_000) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.slice(0, 50).flatMap((item) => {
+      if (!item || typeof item !== "object") return [];
+      const value = item as Record<string, unknown>;
+      const field = String(value.field);
+      const operator = String(value.operator);
+      if (!PANEL_FILTER_FIELD_SET.has(field) || !PANEL_FILTER_OPERATORS.has(operator)) return [];
+      if (!Array.isArray(value.values) || value.values.some((entry) => typeof entry !== "string")) return [];
+      const values = value.values.slice(0, 100).map((entry) => entry.trim()).filter(Boolean);
+      const key = typeof value.key === "string" ? value.key.trim() : undefined;
+      if (field === "custom" && !key) return [];
+      if (field === "age") {
+        if (values.length !== 2) return [];
+        const [minAge, maxAge] = values.map(Number);
+        if (
+          !Number.isInteger(minAge) ||
+          !Number.isInteger(maxAge) ||
+          minAge < 0 ||
+          maxAge > 120 ||
+          minAge > maxAge
+        ) return [];
+        return [{ field: "age", operator: "all", values: [String(minAge), String(maxAge)] }];
+      }
+      return [{
+        field: field as PanelFilterField,
+        operator: operator as PanelFilterGroup["operator"],
+        values,
+        ...(key ? { key } : {}),
+      }];
+    });
+  } catch {
+    return [];
+  }
+}
 
 export interface PanelListParams {
   q?: string;
@@ -10,6 +94,7 @@ export interface PanelListParams {
   customerStatus?: string;
   language?: string;
   segment?: SegmentDefinition | null;
+  filters?: PanelFilterGroup[];
   sort?: "name" | "created" | "email";
   limit?: number;
   offset?: number;
@@ -61,6 +146,83 @@ function segmentConditions(tx: Tx, filters: SegmentFilter[]) {
 }
 
 /** Combined WHERE fragment for all panelist filters (shared by paged list and audience building). */
+
+function panelFilterCondition(tx: Tx, group: PanelFilterGroup, value: string) {
+  if (group.field === "tag") {
+    return tx`exists (select 1 from panelist_tags pt join tags tg on tg.id = pt.tag_id where pt.panelist_id = p.id and pt.org_id = p.org_id and tg.org_id = p.org_id and tg.name = ${value})`;
+  }
+  if (group.field === "message_open") {
+    const separator = value.indexOf(":");
+    const mode = separator > 0 ? value.slice(0, separator) : "opened";
+    const distributionId = separator > 0 ? value.slice(separator + 1) : value;
+    const opened = tx`exists (select 1 from contact_events ce where ce.panelist_id = p.id and ce.distribution_id = ${distributionId} and ce.event_type = 'opened')`;
+    return mode === "not_opened" ? tx`not ${opened}` : opened;
+  }
+  if (group.field === "customer_status") return tx`p.customer_status = ${value}`;
+  const key = group.field === "custom" ? group.key ?? "" : group.field;
+  if (!key) return tx`false`;
+  return tx`exists (
+    select 1
+    from panelist_attributes pa
+    join custom_fields cf on cf.id = pa.field_id
+    cross join lateral jsonb_array_elements_text(
+      case when jsonb_typeof(pa.value) = 'array' then pa.value else jsonb_build_array(pa.value) end
+    ) stored(raw_value)
+    cross join lateral unnest(string_to_array(replace(stored.raw_value, ';', ','), ',')) token(item)
+    where pa.panelist_id = p.id
+      and cf.org_id = p.org_id
+      and cf.key = ${key}
+      and btrim(token.item) = ${value}
+  )`;
+}
+function panelFilterConditions(tx: Tx, filters: PanelFilterGroup[]) {
+  const conditions = [];
+  for (const group of filters) {
+    const values = group.values.filter(Boolean);
+    if (values.length === 0) continue;
+    if (group.field === "age") {
+      const [minAge, maxAge] = values.map(Number);
+      if (
+        values.length === 2 &&
+        Number.isInteger(minAge) &&
+        Number.isInteger(maxAge) &&
+        minAge >= 0 &&
+        maxAge <= 120 &&
+        minAge <= maxAge
+      ) {
+        const year = new Date().getFullYear();
+        // Some imported panels have only an age attribute while others have a
+        // birth year. Both sources describe the same inclusive age interval.
+        conditions.push(tx`(
+          p.birth_year between ${year - maxAge} and ${year - minAge}
+          or exists (
+            select 1
+            from panelist_attributes pa
+            join custom_fields cf on cf.id = pa.field_id and cf.org_id = p.org_id
+            cross join lateral jsonb_array_elements_text(
+              case when jsonb_typeof(pa.value) = 'array' then pa.value else jsonb_build_array(pa.value) end
+            ) stored(raw_value)
+            cross join lateral unnest(string_to_array(replace(stored.raw_value, ';', ','), ',')) token(item)
+            where pa.panelist_id = p.id
+              and pa.org_id = p.org_id
+              and lower(btrim(cf.key)) in ('age', 'alder')
+              and btrim(token.item) ~ '^[0-9]{1,3}$'
+              and btrim(token.item)::int between ${minAge} and ${maxAge}
+          )
+        )`);
+      }
+      continue;
+    }
+    if (group.operator === "all") {
+      conditions.push(...values.map((value) => panelFilterCondition(tx, group, value)));
+      continue;
+    }
+    let combined = tx`false`;
+    for (const value of values) combined = tx`${combined} or ${panelFilterCondition(tx, group, value)}`;
+    conditions.push(group.operator === "none" ? tx`not (${combined})` : combined);
+  }
+  return conditions;
+}
 function panelistWhere(tx: Tx, params: PanelListParams) {
   const conds = [];
   if (params.q) {
@@ -75,9 +237,10 @@ function panelistWhere(tx: Tx, params: PanelListParams) {
                   where pt.panelist_id = p.id and tg.name = ${params.tag})`);
   }
   if (params.segment) conds.push(...segmentConditions(tx, params.segment.filters));
+  if (params.filters) conds.push(...panelFilterConditions(tx, params.filters));
 
   let where = tx`true`;
-  for (const c of conds) where = tx`${where} and ${c}`;
+  for (const c of conds) where = tx`${where} and (${c})`;
   return where;
 }
 
@@ -96,9 +259,15 @@ export async function listPanelists(tx: Tx, params: PanelListParams) {
     select p.id, p.external_id, p.first_name, p.last_name, p.email, p.language, p.birth_year,
            p.gender, p.city, p.customer_status, p.lifecycle, p.created_at,
            coalesce((select array_agg(tg.name order by tg.name) from panelist_tags pt
-                     join tags tg on tg.id = pt.tag_id where pt.panelist_id = p.id), '{}') as tags,
+                     join tags tg on tg.id = pt.tag_id where pt.panelist_id = p.id and pt.org_id = p.org_id), '{}') as tags,
            exists (select 1 from consent_records cr where cr.panelist_id = p.id
-                   and cr.purpose = 'survey_contact' and cr.status = 'granted') as has_consent
+                   and cr.purpose = 'survey_contact' and cr.status = 'granted') as has_consent,
+           coalesce((
+             select jsonb_object_agg(cf.key, pa.value)
+             from panelist_attributes pa
+             join custom_fields cf on cf.id = pa.field_id and cf.org_id = p.org_id
+             where pa.panelist_id = p.id and pa.org_id = p.org_id
+           ), '{}'::jsonb) as attributes
     from panelists p
     where ${where}
     order by ${orderBy}
@@ -252,6 +421,7 @@ export async function resolveAudience(
   input: {
     orgId: string;
     segment?: SegmentDefinition | null;
+    filters?: PanelFilterGroup[];
     method: "all" | "random";
     sampleSize?: number;
     seed?: number;
@@ -277,7 +447,7 @@ export async function resolveAudience(
       throw new Error("Audience seed must be an integer between 0 and 4294967295.");
     }
   }
-  const candidates = await listPanelistIds(tx, { segment: input.segment ?? null, lifecycle: "active" });
+  const candidates = await listPanelistIds(tx, { segment: input.segment ?? null, filters: input.filters, lifecycle: "active" });
   const governance = await getGovernance(tx, input.orgId);
   const { eligible, excluded } = await applyGovernance(tx, candidates, governance);
 

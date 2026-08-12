@@ -14,6 +14,9 @@ Kendte danske og engelske overskrifter normaliseres til panelistfelter. Mellemru
 | `last_name` | `last_name`, `efternavn`, `lastname` |
 | `language` | `language`, `sprog`, `locale` |
 | `country` | `country`, `land` |
+| `tags` | `tags`, `tag`, `labels` |
+
+`Tags` kan indeholde flere tags i samme celle. Adskil tags med komma, semikolon, pipe eller linjeskift. Tags normaliseres til lowercase. Hvis `Tags`-kolonnen er mappet og tom, fjernes eksisterende tags for den importerede panelist. Uden `Tags`-kolonne bevares eksisterende tags ved opdatering.
 
 Andre registrerede custom fields matches via deres normaliserede, stabile nøgle. Filen skal være CSV eller XLSX og må højst være 8 MB.
 
