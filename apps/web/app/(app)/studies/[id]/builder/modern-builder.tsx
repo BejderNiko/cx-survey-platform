@@ -144,10 +144,12 @@ function makeQuestion(type: Question["type"], existing: Question[]): Question {
         fileKey: "",
         startFrameId: "",
         goalFrameId: "",
-        scaling: "fit" as const,
+        scaling: "scale-down" as const,
         instructionPosition: "bottom-right" as const,
         showSuccessScreen: true,
         consentRequired: true,
+        passwordRequired: false,
+        frameScreenshots: [],
       },
     } : {}),
   };
@@ -835,7 +837,7 @@ function QuestionCard({
         {question.type === "first_click" ? (
           <DesignQuestionBody studyId={studyId} question={question} locale={locale} onChange={onChange} />
         ) : question.type === "prototype_test" ? (
-          <PrototypeQuestionBody question={question} locale={locale} onChange={onChange} />
+          <PrototypeQuestionBody studyId={studyId} question={question} locale={locale} onChange={onChange} />
         ) : (
           <QuestionBody question={question} locale={locale} onChange={onChange} />
         )}
@@ -973,8 +975,9 @@ function DesignQuestionBody({
 }
 
 function PrototypeQuestionBody({
-  question, locale, onChange,
+  studyId, question, locale, onChange,
 }: {
+  studyId: string;
   question: Question;
   locale: Locale;
   onChange: (patch: Partial<Question>) => void;
@@ -985,10 +988,12 @@ function PrototypeQuestionBody({
     fileKey: "",
     startFrameId: "",
     goalFrameId: "",
-    scaling: "fit" as const,
+    scaling: "scale-down" as const,
     instructionPosition: "bottom-right" as const,
     showSuccessScreen: true,
     consentRequired: true,
+    passwordRequired: false,
+    frameScreenshots: [],
   };
   const patchConfig = (patch: Partial<typeof config>) => onChange({ prototype: { ...config, ...patch } });
   return (
@@ -998,7 +1003,7 @@ function PrototypeQuestionBody({
       </div>
       <LocalizedField
         label="Task instruction"
-        hint="Shown above the embedded prototype."
+        hint="Shown as an overlay at selected position."
         locale={locale}
         value={question.taskText ?? {}}
         onChange={(taskText) => onChange({ taskText })}
@@ -1028,6 +1033,25 @@ function PrototypeQuestionBody({
         )}
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block text-xs font-semibold text-slate-800">
+          Scaling
+          <Select className="mt-1 w-full" value={config.scaling} onChange={(event) => patchConfig({ scaling: event.target.value as typeof config.scaling })}>
+            <option value="scale-down">Scale down</option><option value="contain">Contain</option><option value="min-zoom">Minimum zoom</option><option value="scale-down-width">Scale down to width</option><option value="fit-width">Fit width</option><option value="free">Free</option>
+          </Select>
+        </label>
+        <label className="block text-xs font-semibold text-slate-800">
+          Instruction position
+          <Select className="mt-1 w-full" value={config.instructionPosition} onChange={(event) => patchConfig({ instructionPosition: event.target.value as typeof config.instructionPosition })}>
+            <option value="top-left">Top left</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option>
+          </Select>
+        </label>
+      </div>
+      <div className="rounded-lg border border-line p-3 text-xs text-slate-600">
+        <p><strong>Figma sync:</strong> {config.lastSyncedAt ? new Date(config.lastSyncedAt).toLocaleString("da-DK") : "Ikke verificeret"}</p>
+        <div className="mt-2 flex gap-2"><a className="inline-flex h-7 items-center rounded-full border border-line px-3 text-xs" href={`/api/figma/connect?studyId=${encodeURIComponent(studyId)}&questionCode=${encodeURIComponent(question.code)}`}>Connect Figma OAuth</a><Button size="sm" variant="secondary" type="button" onClick={async () => { const response = await fetch(`/api/figma/frames?fileKey=${encodeURIComponent(config.fileKey)}`); if (!response.ok) return; const result = await response.json() as { name: string; versionId: string; frames: { id: string; name: string }[] }; const start = result.frames.find((frame) => frame.id === config.startFrameId) ?? result.frames[0]; const goal = result.frames.find((frame) => frame.id === config.goalFrameId); patchConfig({ prototypeName: result.name, versionId: result.versionId, startFrameId: start?.id ?? config.startFrameId, goalFrameId: goal?.id ?? config.goalFrameId, goalFrameName: goal?.name, lastSyncedAt: new Date().toISOString() }); }}>Resync / validate frames</Button><Button size="sm" variant="ghost" onClick={() => patchConfig({ fileKey: "", prototypeName: undefined, startFrameId: "", goalFrameId: undefined, goalFrameName: undefined, versionId: undefined, lastSyncedAt: undefined })}>Remove Figma link</Button></div>
+        <p className="mt-2">Connect virker kun med FIGMA_OAUTH_CLIENT_ID, server-only secret, registreret callback og file_content:read. Resync opdaterer kun efter verificeret REST-svar; live Embed-events kræver fortsat godkendt origin.</p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
         <label className="flex items-center gap-2 text-xs text-slate-700">
           <input type="checkbox" checked={config.consentRequired} onChange={(event) => patchConfig({ consentRequired: event.target.checked })} />
           Require telemetry consent before loading Figma
@@ -1036,6 +1060,18 @@ function PrototypeQuestionBody({
           <input type="checkbox" checked={config.showSuccessScreen} onChange={(event) => patchConfig({ showSuccessScreen: event.target.checked })} />
           Show goal reached message
         </label>
+        <label className="flex items-center gap-2 text-xs text-slate-700">
+          <input type="checkbox" checked={config.passwordRequired} onChange={(event) => patchConfig({ passwordRequired: event.target.checked })} />
+          Prototype is password-protected (password stays in Figma; never stored here)
+        </label>
+      </div>
+      <div className="space-y-3 rounded-lg border border-line p-3">
+        <div className="flex items-center justify-between gap-2"><div><p className="text-xs font-semibold">Approved frame screenshots</p><p className="text-[11px] text-slate-500">Upload only screenshots approved for private storage. Used for filmstrip, click overlay and heatmap.</p></div><Button size="sm" variant="secondary" onClick={() => patchConfig({ frameScreenshots: [...config.frameScreenshots, { frameId: "", frameName: `Frame ${config.frameScreenshots.length + 1}`, coordinateScale: 1 }] })}>Add frame</Button></div>
+        {config.frameScreenshots.map((entry, index) => <div key={`${entry.frameId}-${index}`} className="space-y-2 rounded-md border border-line p-2">
+          <div className="grid gap-2 sm:grid-cols-3"><Input value={entry.frameId} maxLength={200} placeholder="Frame ID" onChange={(event) => { const next = structuredClone(config.frameScreenshots); next[index].frameId = event.target.value.trim(); patchConfig({ frameScreenshots: next }); }} /><Input value={entry.frameName} maxLength={200} placeholder="Frame name" onChange={(event) => { const next = structuredClone(config.frameScreenshots); next[index].frameName = event.target.value; patchConfig({ frameScreenshots: next }); }} /><Input type="number" min="0.1" max="8" step="0.1" aria-label="Coordinate scale" value={entry.coordinateScale} onChange={(event) => { const next = structuredClone(config.frameScreenshots); next[index].coordinateScale = Number(event.target.value); patchConfig({ frameScreenshots: next }); }} /></div>
+          <StimulusEditor studyId={studyId} kind="prototype_frame" label={`Screenshot: ${entry.frameName || entry.frameId || index + 1}`} value={entry.screenshot ?? null} onChange={(screenshot) => { const next = structuredClone(config.frameScreenshots); next[index].screenshot = screenshot; patchConfig({ frameScreenshots: next }); }} onRemove={() => { const next = structuredClone(config.frameScreenshots); next[index].screenshot = undefined; patchConfig({ frameScreenshots: next }); }} />
+          <Button size="sm" variant="ghost" onClick={() => patchConfig({ frameScreenshots: config.frameScreenshots.filter((_, current) => current !== index) })}>Remove frame</Button>
+        </div>)}
       </div>
       <p className="text-xs text-slate-500">
         Screenshots are not copied from Figma. Add approved private-storage screenshots later for result overlays.

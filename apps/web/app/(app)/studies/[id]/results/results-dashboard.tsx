@@ -5,15 +5,21 @@ import { Card, KpiTile, Table, Td, Th } from "@/components/ui";
 import { requireSession } from "@/lib/auth";
 import { withUser } from "@/lib/db";
 import { fmtDateTime, fmtNumber } from "@/lib/format";
+import { loadLatestResultData } from "@/lib/results-data";
 import { buildPrototypePaths, groupCommonPaths, type PrototypeInteractionRow } from "@/lib/prototype-results";
+import { PrototypeResultView } from "./prototype-result-view";
 import {
   draftFiltersFromNaturalLanguage,
+  facetCounts,
+  facetLabel,
   filterResponses,
+  mergeResultFilters,
   parseResultFilters,
-  RESULT_RESPONSE_LIMIT,
+  RESULT_FACETS,
   resultFilterKey,
   resultFilterLabel,
   serializeResultFilters,
+  tagFacetCounts,
   type FilterableResponse,
   type ResultFilter,
 } from "@/lib/results-filters";
@@ -24,35 +30,7 @@ type Search = { filters?: string; ask?: string };
 export async function ResultsDashboard({ studyId, search }: { studyId: string; search: Search }) {
   const session = await requireSession();
   assertCan(session.role, "responses.view");
-  const data = await withUser(session.userId, session.orgId, async (tx) => {
-    const [study] = await tx`select id, title, draft_definition from studies where id = ${studyId} and org_id = ${session.orgId}`;
-    if (!study) return null;
-    const [version] = await tx`
-      select id, version_number, definition from study_versions
-      where study_id = ${studyId} and org_id = ${session.orgId} order by version_number desc limit 1`;
-    const responses = await tx`
-      select r.id, r.respondent_key, r.started_at, r.channel, r.panelist_id,
-             v.version_number, p.first_name, p.last_name,
-             coalesce((select array_agg(t.name order by t.name)
-                       from panelist_tags pt join tags t on t.id = pt.tag_id and t.org_id = pt.org_id
-                       where pt.panelist_id = r.panelist_id and pt.org_id = r.org_id), '{}') as tags
-      from responses r
-      join study_versions v on v.id = r.study_version_id and v.org_id = r.org_id
-      left join panelists p on p.id = r.panelist_id and p.org_id = r.org_id
-      where r.study_id = ${studyId} and r.org_id = ${session.orgId} and r.status = 'completed'
-      order by r.started_at desc
-      limit ${RESULT_RESPONSE_LIMIT}`;
-    const answers = await tx`
-      select ra.response_id, ra.question_code, ra.value
-      from response_answers ra join responses r on r.id = ra.response_id and r.org_id = ra.org_id
-      where r.study_id = ${studyId} and r.org_id = ${session.orgId} and r.status = 'completed'`;
-    const interactions = await tx`
-      select ie.response_id, ie.question_code, ie.event_type, ie.payload
-      from interaction_events ie join responses r on r.id = ie.response_id and r.org_id = ie.org_id
-      where r.study_id = ${studyId} and r.org_id = ${session.orgId} and r.status = 'completed'
-      order by ie.created_at asc, ie.id asc`;
-    return { study, version, responses, answers, interactions };
-  });
+  const data = await withUser(session.userId, session.orgId, (tx) => loadLatestResultData(tx, session.orgId, studyId));
   if (!data) notFound();
 
   const parsed = instrumentDefinition.safeParse(data.version?.definition ?? data.study.draft_definition);
@@ -79,6 +57,11 @@ export async function ResultsDashboard({ studyId, search }: { studyId: string; s
       answers: answersByResponse.get(id) ?? {},
       tags: (row.tags as unknown[]).map(String),
       paths,
+      facets: {
+        location: String(row.location),
+        ageRange: String(row.age_range),
+        source: String(row.source),
+      },
       source: row,
     } satisfies FilterableResponse & { source: typeof row };
   });
@@ -91,9 +74,8 @@ export async function ResultsDashboard({ studyId, search }: { studyId: string; s
   const insightDraft = search.ask ? buildInsightDraft(search.ask, definition, questionValues) : null;
   const draft = search.ask && !insightDraft ? draftFiltersFromNaturalLanguage(search.ask, definition) : null;
   const draftFilters = draft?.filters ?? [];
-  const combinedDraft = mergeFilters(filters, draftFilters);
-  const tagCounts = new Map<string, number>();
-  for (const response of responseRows) for (const tag of response.tags) tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
+  const combinedDraft = mergeResultFilters(filters, draftFilters);
+  const dynamicTagCounts = tagFacetCounts(responseRows, filters);
 
   return (
     <div className="space-y-4">
@@ -101,10 +83,10 @@ export async function ResultsDashboard({ studyId, search }: { studyId: string; s
         {data.version ? `Instrumentversion v${data.version.version_number}` : "Kladde"} · alle beregninger bruger samme filtrerede mængde.
       </p>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiTile label="Svar vist" value={String(filtered.length)} hint={`${filtered.length} / ${responseRows.length} gennemførte`} />
-        <KpiTile label="Gennemførte i alt" value={String(responseRows.length)} />
+        <KpiTile label={filters.length ? "Svar vist - FILTRERET" : "Svar vist"} value={String(filtered.length)} hint={`${filtered.length} / ${responseRows.length} gennemførte`} />
+        <KpiTile label="Deltagere" value={String(responseRows.length)} hint="Bounded version-population" />
         <KpiTile label="Andel vist" value={`${fmtNumber(responseRows.length ? filtered.length / responseRows.length * 100 : 0, 1)} %`} hint={`${filtered.length} ÷ ${responseRows.length || 0}`} />
-        <KpiTile label="Aktive filtre" value={String(filters.length)} />
+        <KpiTile label="Status" value={String(data.study.status)} hint={`${filters.length} / 20 aktive filtre`} />
       </div>
 
       <Card title="Globale filtre">
@@ -114,7 +96,7 @@ export async function ResultsDashboard({ studyId, search }: { studyId: string; s
               {resultFilterLabel(filter, definition)} ×
             </Link>
           ))}
-          {filters.length === 0 && <span className="text-sm text-muted">Ingen filtre. Klik tragt ved svar, path eller paneltag.</span>}
+          {filters.length === 0 && <span className="text-sm text-muted">Ingen filtre. Klik tragt ved svar, path, location, alder, kilde eller paneltag.</span>}
         </div>
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
           <form action={`/studies/${studyId}/results`} className="space-y-2">
@@ -128,12 +110,21 @@ export async function ResultsDashboard({ studyId, search }: { studyId: string; s
           <div className="text-xs text-muted">
             {insightDraft ? <><p className="font-medium text-heading">{insightDraft.text}</p><p className="mt-1">Grundlag: {insightDraft.basis}</p><p className="mt-1">Proveniens: {insightDraft.provenance}</p><p className="mt-2">Kun preview; ingen filtre, analysejob eller rapport ændres automatisk.</p></> : draft ? <><p>{draft.explanation}</p><p className="mt-1">Proveniens: {draft.provenance}</p>{draftFilters.length > 0 && <Link href={hrefFor(combinedDraft)} className="mt-2 inline-flex rounded-md border border-line px-3 py-1.5 font-medium text-heading">Bekræft og anvend udkast</Link>}</> : <p>Udkast ændrer intet før bekræftelse. Chips kan fjernes bagefter.</p>}
           </div>
+        </div>      </Card>
+      <Card title="Dynamiske facetter">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {RESULT_FACETS.map((facet) => <details key={facet}><summary className="mb-1 cursor-pointer text-xs font-semibold">{facetLabel(facet)} · vis flere/færre</summary><div className="flex flex-wrap gap-1">
+            {facetCounts(responseRows, filters, facet).map((entry, index) => <label key={entry.value} className={`flex items-center gap-1 rounded border px-2 py-1 text-xs ${index >= 6 ? "[details:not([open])_&]:hidden" : ""} ${entry.active ? "border-accent bg-accent-soft text-accent" : "border-line"}`}><input type="checkbox" readOnly checked={entry.active} /><Link href={hrefFor(entry.active ? filters.filter((item) => resultFilterKey(item) !== resultFilterKey({ kind: "facet", facet, value: entry.value })) : mergeResultFilters(filters, [{ kind: "facet", facet, value: entry.value }]))}>{entry.value} · {entry.matching} OF {entry.total}</Link></label>)}
+          </div></details>)}
+          <div><p className="mb-1 text-xs font-semibold">Paneltags</p><div className="flex flex-wrap gap-1">
+            {dynamicTagCounts.map((entry) => <Link key={entry.value} href={hrefFor(mergeResultFilters(filters, [{ kind: "tag", value: entry.value }]))} className={`rounded-full border px-2 py-1 text-xs ${entry.active ? "border-accent bg-accent-soft text-accent" : "border-line"}`}>⌁ {entry.value} · {entry.matching} OF {entry.total}</Link>)}
+          </div></div>
         </div>
-        {tagCounts.size > 0 && <div className="mt-4 flex flex-wrap gap-2 border-t border-line pt-3">{[...tagCounts].map(([tag, count]) => <Link key={tag} href={hrefFor(mergeFilters(filters, [{ kind: "tag", value: tag }]))} className="rounded-full border border-line px-2.5 py-1 text-xs">⌁ {tag} · {count}</Link>)}</div>}
+        <p className="mt-3 text-xs text-muted">Facetter viser op til alle værdier; lange lister kan åbnes/lukkes med browserens Details-kontrol. X = matcher facetværdien efter øvrige aktive filtre. Y = hele bounded version-populationen. Valg inden for samme facet erstatter tidligere valg; filtre på tværs kombineres med AND.</p>
       </Card>
 
       {allQuestions(definition).map((question) => question.type === "prototype_test" ? (
-        <PrototypeResult key={question.code} question={question} values={questionValues(question.code)} paths={(pathsByQuestion.get(question.code) ?? []).filter((path) => filteredIds.has(path.responseId))} filters={filters} hrefFor={hrefFor} />
+        <PrototypeResult key={question.code} studyId={studyId} question={question} values={questionValues(question.code)} paths={(pathsByQuestion.get(question.code) ?? []).filter((path) => filteredIds.has(path.responseId))} filters={filters} />
       ) : (
         <QuestionResult key={question.code} question={question} values={questionValues(question.code)} filters={filters} hrefFor={hrefFor} />
       ))}
@@ -159,7 +150,7 @@ export async function ResultsDashboard({ studyId, search }: { studyId: string; s
 }
 
 function QuestionResult({ question, values, filters, hrefFor }: { question: Question; values: unknown[]; filters: ResultFilter[]; hrefFor: (filters: ResultFilter[]) => string }) {
-  const title = <span>{lt(question.label, "da") || question.code} <span className="text-xs font-normal text-muted">n = {values.length}</span></span>;
+  const title = <span>{lt(question.label, "da") || question.code} {question.visibleIf?.length ? <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">LOGIC</span> : null} <span className="text-xs font-normal text-muted">n = {values.length}</span></span>;
   if (question.type === "nps") {
     const result = computeNps(values);
     return <Card title={title}><div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-4"><KpiTile label="NPS" value={result.score === null ? "—" : fmtNumber(result.score)} hint={`(${result.promoters} − ${result.detractors}) / ${result.valid}`} /><KpiTile label="Ambassadører" value={String(result.promoters)} /><KpiTile label="Passive" value={String(result.passives)} /><KpiTile label="Kritikere" value={String(result.detractors)} /></div><Bars question={question} options={Array.from({ length: 11 }, (_, value) => ({ value: String(value), label: String(value) }))} values={values} filters={filters} hrefFor={hrefFor} /></Card>;
@@ -181,25 +172,24 @@ function Bars({ question, options, values, filters, hrefFor }: { question: Quest
     const count = counts.get(option.value) ?? 0;
     const filter: ResultFilter = { kind: "answer", questionCode: question.code, value: option.value };
     const active = filters.some((item) => resultFilterKey(item) === resultFilterKey(filter));
-    return <div key={option.value} className={count === 0 ? "opacity-45" : ""}><div className="flex items-center gap-2 text-sm"><span className="w-44 truncate" title={option.label}>{option.label}</span><div className="h-4 flex-1 overflow-hidden rounded bg-background"><div className="h-full rounded bg-accent/80" style={{ width: `${count / max * 100}%` }} /></div><span className="w-12 text-right tabular-nums">{count}</span><Link aria-label={`Filtrér på ${option.label}`} href={hrefFor(mergeFilters(filters, [filter]))} className={active ? "text-accent" : "text-muted"}>▽</Link></div></div>;
+    return <div key={option.value} className={count === 0 ? "opacity-45" : ""}><div className="flex items-center gap-2 text-sm"><span className="w-44 truncate" title={option.label}>{option.label}</span><div className="h-4 flex-1 overflow-hidden rounded bg-background"><div className="h-full rounded bg-accent/80" style={{ width: `${count / max * 100}%` }} /></div><span className="w-24 text-right tabular-nums">{count} · {values.length ? fmtNumber(count / values.length * 100, 1) : 0} %</span><Link aria-label={`Filtrér på ${option.label}`} href={hrefFor(mergeFilters(filters, [filter]))} className={active ? "text-accent" : "text-muted"}>▽</Link></div></div>;
   })}</div>;
 }
 
-function PrototypeResult({ question, values, paths, filters, hrefFor }: { question: Question; values: unknown[]; paths: ReturnType<typeof buildPrototypePaths>; filters: ResultFilter[]; hrefFor: (filters: ResultFilter[]) => string }) {
+function PrototypeResult({ studyId, question, values, paths, filters }: { studyId: string; question: Question; values: unknown[]; paths: ReturnType<typeof buildPrototypePaths>; filters: ResultFilter[] }) {
   const groups = groupCommonPaths(paths);
-  const successes = values.filter((value) => value && typeof value === "object" && (value as Record<string, unknown>).reachedGoal === true).length;
+  const goalFrameId = question.prototype?.goalFrameId;
+  const successes = goalFrameId ? paths.filter((path) => path.frames.includes(goalFrameId)).length : 0;
   const clicks = paths.flatMap((path) => path.clicks);
   const misclicks = clicks.filter((click) => click.isMisclick).length;
+  const averageElapsedMs = paths.length ? paths.reduce((sum, path) => sum + path.elapsedMs, 0) / paths.length : 0;
+  const screenshots = (question.prototype?.frameScreenshots ?? []).flatMap((entry) => entry.screenshot ? [{ frameId: entry.frameId, frameName: entry.frameName, assetId: entry.screenshot.assetId, coordinateScale: entry.coordinateScale }] : []);
   return <Card title={`${lt(question.label, "da") || question.code} · Prototype paths`}>
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4"><KpiTile label="Mål nået" value={`${values.length ? fmtNumber(successes / values.length * 100, 1) : 0} %`} hint={`${successes} ÷ ${values.length}`} /><KpiTile label="Deltagere" value={String(values.length)} /><KpiTile label="Klik" value={String(clicks.length)} hint={`${misclicks} fejlklik`} /><KpiTile label="Fælles paths" value={String(groups.length)} /></div>
-    <div className="mt-4 space-y-3">{groups.slice(0, 10).map((group, index) => {
-      const filter: ResultFilter = { kind: "path", questionCode: question.code, signature: group.signature };
-      return <div key={group.signature || "empty"} className="rounded-lg border border-line p-3"><div className="flex flex-wrap items-center justify-between gap-2"><strong>Path {index + 1}</strong><Link href={hrefFor(mergeFilters(filters, [filter]))} className="text-xs text-accent">▽ Filtrér</Link></div><p className="mt-1 break-all text-xs text-muted">{group.frames.join(" → ") || "Ingen frame-events"}</p><p className="mt-2 text-xs">{group.participantCount} deltagere · {group.clickCount} klik · {group.misclickCount} fejlklik · gns. {fmtNumber(group.averageElapsedMs / 1000, 1)} s</p></div>;
-    })}</div>
-    <p className="mt-3 text-xs text-muted">Klikdata er koordinater fra Figma Embed API. Screenshot-overlay vises først, når godkendte screenshots findes i privat storage; ingen Figma-scraping bruges.</p>
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-5"><KpiTile label={question.prototype?.flowType === "free" ? "Flow" : "Mål nået"} value={question.prototype?.flowType === "free" ? "Free" : `${values.length ? fmtNumber(successes / values.length * 100, 1) : 0} %`} hint={question.prototype?.flowType === "free" ? "Intet goal-krav" : `${successes} ÷ ${values.length}`} /><KpiTile label="Deltagere" value={String(values.length)} /><KpiTile label="Gennemsnitstid" value={`${fmtNumber(averageElapsedMs / 1000, 1)} s`} hint={`${fmtNumber(paths.reduce((sum, path) => sum + path.elapsedMs, 0) / 1000, 1)} s ÷ ${paths.length}`} /><KpiTile label="Klik" value={String(clicks.length)} hint={`${misclicks} fejlklik · ${clicks.length ? fmtNumber(misclicks / clicks.length * 100, 1) : 0} %`} /><KpiTile label="Fælles paths" value={String(groups.length)} /></div>
+    <PrototypeResultView studyId={studyId} questionCode={question.code} flowType={question.prototype?.flowType ?? "task"} goalFrameId={goalFrameId} paths={paths} filters={filters} screenshots={screenshots} />
+    <p className="mt-3 text-xs text-muted">Path-succes beregnes som ‘goal frame set mindst én gang’. Screenshot-overlay bruger kun godkendte private-storage assets. Koordinatskala skal matche Figma-frame og screenshot-export; live alignment er ikke verificeret uden rigtig prototype.</p>
   </Card>;
 }
-
 type InsightDraft = { text: string; basis: string; provenance: string };
 
 function buildInsightDraft(
@@ -246,10 +236,7 @@ function normalizeInsightNeedle(value: string): string {
 }
 
 function mergeFilters(existing: ResultFilter[], additions: ResultFilter[]): ResultFilter[] {
-  const result = [...existing];
-  const keys = new Set(existing.map(resultFilterKey));
-  for (const filter of additions) if (!keys.has(resultFilterKey(filter))) { result.push(filter); keys.add(resultFilterKey(filter)); }
-  return result;
+  return mergeResultFilters(existing, additions);
 }
 
 function resultHref(studyId: string, filters: ResultFilter[]): string {

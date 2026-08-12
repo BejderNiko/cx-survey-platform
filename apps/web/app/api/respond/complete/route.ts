@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_SUBMISSION_INTERACTIONS } from "@ok/domain";
 import { completeResponse } from "@/lib/data/respondent";
 import { clientKey, rateLimit } from "@/lib/rate-limit";
 
@@ -17,7 +18,7 @@ const bodySchema = z.object({
         payload: z.record(z.string(), z.unknown()),
       }),
     )
-    .max(50)
+    .max(MAX_SUBMISSION_INTERACTIONS)
     .default([]),
 });
 

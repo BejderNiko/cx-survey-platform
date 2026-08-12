@@ -12,7 +12,7 @@ export async function ReportJobs({ studyId, filters }: { studyId: string; filter
   const jobs = await withUser(
     session.userId,
     session.orgId,
-    (tx) => tx`select id, format, status, input_snapshot, error_code, created_at from report_jobs where study_id = ${studyId} and org_id = ${session.orgId} order by created_at desc limit 20`,
+    (tx) => tx`select id, format, status, input_snapshot, error_code, output_sha256, output_byte_size, artifact_release_status, created_at from report_jobs where study_id = ${studyId} and org_id = ${session.orgId} order by created_at desc limit 20`,
   ).catch((error) => {
     if (!(error && typeof error === "object" && "code" in error && error.code === "42P01")) throw error;
     return null;
@@ -26,9 +26,9 @@ export async function ReportJobs({ studyId, filters }: { studyId: string; filter
     <Card title="Rapport-eksport">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-sm">Asynkrone jobs fastfryser instrumentversion, filterudkast, kilder og base.</p>
+          <p className="text-sm">Jobs fastfryser instrumentversion, filtre, kilder, strukturerede indsigter og både total/filtreret base.</p>
           <p className="mt-1 text-xs text-amber-800">
-            Templateblokering: den angivne CX-template på \\ok.dk er ikke læsbar i miljøet. Job kan køsættes, men må ikke markeres færdigt før template, worker, render og visuel QA findes.
+            Templateblokering: CX-template på \\ok.dk er ikke læsbar. Automatisk queue-worker bygger et strukturelt DRAFT_UNBRANDED-artefakt med checksum og lineage; det er ikke releaseklart eller template-verificeret før render og visuel QA.
           </p>
         </div>
         <ReportJobButtons studyId={studyId} filters={serializeResultFilters(filters)} />
@@ -36,7 +36,7 @@ export async function ReportJobs({ studyId, filters }: { studyId: string; filter
       <ul className="mt-3 space-y-1 text-xs">
         {jobs.map((job) => (
           <li key={job.id}>
-            <Badge>{String(job.status)}</Badge> {String(job.format).toUpperCase()} · {fmtDateTime(job.created_at)} · base {String((job.input_snapshot as Record<string, unknown>).responseBaseBeforeFilters ?? "—")}{job.error_code ? ` · ${job.error_code}` : ""}
+            <Badge>{String(job.status)}</Badge> {String(job.format).toUpperCase()} · {fmtDateTime(job.created_at)} · filtreret base {String((job.input_snapshot as Record<string, unknown>).filteredResponseBase ?? "—")} / {String((job.input_snapshot as Record<string, unknown>).responseBaseBeforeFilters ?? "—")}{job.error_code ? ` · ${job.error_code}` : ""}{job.status === "succeeded" && <span className="ml-2"><a className="text-accent underline" href={`/api/report-jobs/${job.id}/download`}>Download draft</a> · {String(job.output_byte_size)} bytes · SHA-256 {String(job.output_sha256).slice(0, 12)}… · {String(job.artifact_release_status)}</span>}
           </li>
         ))}
       </ul>

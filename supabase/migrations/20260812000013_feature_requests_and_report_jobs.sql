@@ -5,6 +5,10 @@ create type feature_request_status as enum ('new','planned','in_progress','done'
 create type report_job_status as enum ('queued','running','succeeded','failed','cancelled');
 create type report_format as enum ('docx','pptx');
 
+alter table media_assets drop constraint if exists media_assets_kind_check;
+alter table media_assets add constraint media_assets_kind_check
+  check (kind in ('context','preference','first_click','prototype_frame'));
+
 create table feature_requests (
   id uuid primary key default gen_random_uuid(),
   org_id uuid not null references organizations(id) on delete cascade,
@@ -41,13 +45,15 @@ create table report_jobs (
   id uuid primary key default gen_random_uuid(),
   org_id uuid not null references organizations(id) on delete cascade,
   study_id uuid not null,
-  study_version_id uuid,
+  study_version_id uuid not null,
   requested_by uuid not null references users(id),
   format report_format not null,
   status report_job_status not null default 'queued',
   input_snapshot jsonb not null check (pg_column_size(input_snapshot) <= 1048576),
   template_reference text,
   output_storage_key text,
+  output_content_type text check (output_content_type in ('application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/vnd.openxmlformats-officedocument.presentationml.presentation')),
+  artifact_release_status text not null default 'draft_unbranded' check (artifact_release_status in ('draft_unbranded','template_verified')),
   output_sha256 text check (output_sha256 is null or output_sha256 ~ '^[0-9a-f]{64}$'),
   output_byte_size bigint check (output_byte_size is null or output_byte_size > 0),
   error_code text,
@@ -57,7 +63,7 @@ create table report_jobs (
   foreign key (org_id, study_id, study_version_id) references study_versions(org_id, study_id, id) on delete restrict,
   completed_at timestamptz,
   foreign key (org_id, study_id) references studies(org_id, id) on delete cascade,
-  check ((status = 'succeeded') = (output_storage_key is not null and output_sha256 is not null and completed_at is not null)),
+  check ((status = 'succeeded') = (output_storage_key is not null and output_sha256 is not null and output_byte_size is not null and output_content_type is not null and completed_at is not null)),
   check (error_message is null or length(error_message) <= 2000),
   foreign key (org_id, requested_by) references memberships(org_id, user_id)
 );

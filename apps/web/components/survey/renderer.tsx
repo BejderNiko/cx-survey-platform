@@ -5,6 +5,7 @@ import {
   allQuestions,
   lt,
   nextStep,
+  recordSubmissionInteraction,
   type InstrumentDefinition,
   type Locale,
   type Question,
@@ -58,6 +59,14 @@ export function SurveyRenderer({
   const [validationMsg, setValidationMsg] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const interactionsRef = useRef<InteractionPayload[]>([]);
+  const recordInteraction = useCallback((interaction: InteractionPayload): boolean => {
+    const result = recordSubmissionInteraction(definition, interactionsRef.current, interaction);
+    interactionsRef.current = result.interactions;
+    if (!result.ok) {
+      setValidationMsg(locale === "da" ? `Telemetri kunne ikke registreres: ${result.error}` : `Telemetry could not be recorded: ${result.error}`);
+    }
+    return result.ok;
+  }, [definition, locale]);
 
   const questions = useMemo(() => allQuestions(definition).filter((question) => !question.hidden), [definition]);
   const total = questions.length;
@@ -221,7 +230,7 @@ export function SurveyRenderer({
                   locale={locale}
                   value={answerValue}
                   onChange={setAnswer}
-                  interactions={interactionsRef}
+                  recordInteraction={recordInteraction}
                   assetToken={assetToken}
                 />
               </div>
@@ -334,13 +343,13 @@ function OptionList({
 }
 
 function QuestionInput({
-  question, locale, value, onChange, interactions: interactionsRef, assetToken,
+  question, locale, value, onChange, recordInteraction, assetToken,
 }: {
   question: Question;
   locale: Locale;
   value: unknown;
   onChange: (v: unknown) => void;
-  interactions: React.RefObject<InteractionPayload[]>;
+  recordInteraction: (interaction: InteractionPayload) => boolean;
   assetToken?: string;
 }) {
   switch (question.type) {
@@ -509,13 +518,13 @@ function QuestionInput({
     case "prototype_test":
       return question.prototype ? (
         <div>
-          {question.taskText && <p className="mb-3 rounded-md bg-accent-soft px-3 py-2 text-sm">{lt(question.taskText, locale)}</p>}
           <FigmaPrototype
             code={question.code}
             config={question.prototype}
             value={value}
             onChange={onChange}
-            interactions={interactionsRef}
+            recordInteraction={recordInteraction}
+            instruction={lt(question.taskText, locale)}
           />
         </div>
       ) : <p role="alert" className="text-sm text-danger">Prototype configuration is missing.</p>;
@@ -534,11 +543,8 @@ function QuestionInput({
       const response = value as { x: number; y: number; selectedAssetId?: string } | undefined;
       const stimuli = question.stimuli ?? (question.stimulus ? [question.stimulus] : []);
       const recordClick = (assetId: string, pt: { x: number; y: number }, meta: Record<string, unknown>) => {
-        onChange({ ...pt, selectedAssetId: assetId });
-        interactionsRef.current = [
-          ...interactionsRef.current.filter((entry) => entry.code !== question.code),
-          { code: question.code, eventType: "first_click", payload: { ...pt, ...meta, assetId } },
-        ];
+        const accepted = recordInteraction({ code: question.code, eventType: "first_click", payload: { ...pt, ...meta, assetId } });
+        if (accepted) onChange({ ...pt, selectedAssetId: assetId });
       };
       return (
         <div>
@@ -563,11 +569,8 @@ function QuestionInput({
               altText="Teststimulus"
               value={response}
               onClickPoint={(pt, meta) => {
-                onChange(pt);
-                interactionsRef.current = [
-                  ...interactionsRef.current.filter((entry) => entry.code !== question.code),
-                  { code: question.code, eventType: "first_click", payload: { ...pt, ...meta } },
-                ];
+                const accepted = recordInteraction({ code: question.code, eventType: "first_click", payload: { ...pt, ...meta } });
+                if (accepted) onChange(pt);
               }}
             />
           )}

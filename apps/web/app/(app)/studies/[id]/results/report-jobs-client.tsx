@@ -9,7 +9,7 @@ export function ReportJobButtons({ studyId, filters }: { studyId: string; filter
   const [message, setMessage] = useState<string | null>(null);
   const request = (format: "docx" | "pptx") => startTransition(async () => {
     const result = await requestReportJob({ studyId, format, filters });
-    setMessage(result.ok ? `Rapportjob ${result.id} er sat i kø.` : result.error);
+    setMessage(result.ok ? `Rapportjob ${result.id} er sat i sikker kø. Worker behandler automatisk.` : result.error);
   });
   return <div><div className="flex gap-2"><Button disabled={pending} onClick={() => request("docx")}>Bestil DOCX</Button><Button disabled={pending} variant="secondary" onClick={() => request("pptx")}>Bestil PPTX</Button></div>{message && <p role="status" className="mt-2 text-xs">{message}</p>}</div>;
 }

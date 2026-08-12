@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_SUBMISSION_INTERACTIONS, requiredInteractionBudget } from "./interaction-budget";
 
 /**
  * Instrument definition: the versioned survey document stored in
@@ -98,13 +99,25 @@ export const prototypeTestConfig = z.object({
   startFrameId: z.string().trim().min(1).max(200),
   goalFrameId: z.string().trim().min(1).max(200).optional(),
   goalFrameName: z.string().trim().max(200).optional(),
-  scaling: z.enum(["fit", "width", "contain"]).default("fit"),
+  scaling: z.enum(["scale-down", "contain", "min-zoom", "scale-down-width", "fit-width", "free", "fit", "width"]).default("scale-down"),
   instructionPosition: z.enum(["top-left", "top-right", "bottom-left", "bottom-right"]).default("bottom-right"),
   showSuccessScreen: z.boolean().default(true),
   consentRequired: z.boolean().default(true),
+  passwordRequired: z.boolean().default(false), // never store a Figma password in the instrument
+  lastSyncedAt: z.string().datetime().optional(),
+  frameScreenshots: z.array(z.object({
+    frameId: z.string().trim().min(1).max(200),
+    frameName: z.string().trim().min(1).max(200),
+    screenshot: stimulusAsset.optional(),
+    coordinateScale: z.number().min(0.1).max(8).default(1),
+  })).max(100).default([]),
   versionId: z.string().trim().max(200).optional(),
 });
 export type PrototypeTestConfig = z.infer<typeof prototypeTestConfig>;
+/** Success is sticky: leaving the goal frame never turns a successful task into a failure. */
+export function prototypeGoalReached(alreadyReached: boolean, frameId: string, goalFrameId: string | undefined): boolean {
+  return alreadyReached || Boolean(goalFrameId && frameId === goalFrameId);
+}
 
 export const question = z.object({
   code: z.string().regex(/^[a-z][a-z0-9_]*$/, "codes are snake_case identifiers"),
@@ -264,6 +277,10 @@ export function validateInstrument(def: InstrumentDefinition): string[] {
         problems.push(`Prototype test '${q.code}' is missing a goal frame.`);
       }
     }
+  }
+  const requiredBudget = requiredInteractionBudget(qs.filter((q) => !q.hidden).map((q) => q.type));
+  if (requiredBudget > MAX_SUBMISSION_INTERACTIONS) {
+    problems.push(`Instrument interaction budget ${requiredBudget} exceeds bounded limit ${MAX_SUBMISSION_INTERACTIONS}. Reduce prototype or first-click questions.`);
   }
   const order = qs.map((q) => q.code);
   const hiddenCodes = new Set(def.blocks.flatMap((currentBlock) =>
