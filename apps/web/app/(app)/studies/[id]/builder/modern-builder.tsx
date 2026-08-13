@@ -17,6 +17,7 @@ import {
 import { Badge, Button, Input, Label, Select, Textarea, cn } from "@/components/ui";
 import { SurveyRenderer } from "@/components/survey/renderer";
 import { updateDraft } from "../../actions";
+import { FigmaFramePicker } from "./figma-frame-picker";
 import { StimulusEditor } from "./stimulus-editor";
 
 const OPTION_TYPES = ["single_choice", "multiple_choice", "dropdown", "likert", "ranking"];
@@ -1048,7 +1049,8 @@ function PrototypeQuestionBody({
       </div>
       <div className="rounded-lg border border-line p-3 text-xs text-slate-600">
         <p><strong>Figma sync:</strong> {config.lastSyncedAt ? new Date(config.lastSyncedAt).toLocaleString("da-DK") : "Ikke verificeret"}</p>
-        <div className="mt-2 flex gap-2"><a className="inline-flex h-7 items-center rounded-full border border-line px-3 text-xs" href={`/api/figma/connect?studyId=${encodeURIComponent(studyId)}&questionCode=${encodeURIComponent(question.code)}`}>Connect Figma OAuth</a><Button size="sm" variant="secondary" type="button" onClick={async () => { const response = await fetch(`/api/figma/frames?fileKey=${encodeURIComponent(config.fileKey)}`); if (!response.ok) return; const result = await response.json() as { name: string; versionId: string; frames: { id: string; name: string }[] }; const start = result.frames.find((frame) => frame.id === config.startFrameId) ?? result.frames[0]; const goal = result.frames.find((frame) => frame.id === config.goalFrameId); patchConfig({ prototypeName: result.name, versionId: result.versionId, startFrameId: start?.id ?? config.startFrameId, goalFrameId: goal?.id ?? config.goalFrameId, goalFrameName: goal?.name, lastSyncedAt: new Date().toISOString() }); }}>Resync / validate frames</Button><Button size="sm" variant="ghost" onClick={() => patchConfig({ fileKey: "", prototypeName: undefined, startFrameId: "", goalFrameId: undefined, goalFrameName: undefined, versionId: undefined, lastSyncedAt: undefined })}>Remove Figma link</Button></div>
+        <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" variant="ghost" onClick={() => patchConfig({ fileKey: "", prototypeName: undefined, startFrameId: "", goalFrameId: undefined, goalFrameName: undefined, versionId: undefined, lastSyncedAt: undefined })}>Remove Figma link</Button></div>
+        <FigmaFramePicker studyId={studyId} questionCode={question.code} config={config} onPatch={patchConfig} />
         <p className="mt-2">Connect virker kun med FIGMA_OAUTH_CLIENT_ID, server-only secret, registreret callback og file_content:read. Resync opdaterer kun efter verificeret REST-svar; live Embed-events kræver fortsat godkendt origin.</p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">

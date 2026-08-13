@@ -265,6 +265,9 @@ export function validateInstrument(def: InstrumentDefinition): string[] {
         problems.push(`Rating question '${q.code}' needs an integer scale spanning 1 to 20 steps.`);
       }
     }
+    if (q.imageUrl) {
+      problems.push(`Question '${q.code}' uses legacy imageUrl. Upload a protected media asset before saving or publishing a new draft.`);
+    }
     if (q.type === "first_click" && !q.imageUrl && !q.stimulus && !(q.stimuli?.length)) {
       problems.push(`Første-klik-spørgsmålet '${q.code}' mangler et stimulusbillede.`);
     }

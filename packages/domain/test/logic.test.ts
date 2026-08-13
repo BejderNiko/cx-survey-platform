@@ -56,6 +56,13 @@ describe("survey logic engine", () => {
     expect(validateInstrument(def)).toEqual([]);
   });
 
+  it("parses legacy imageUrl for immutable playback but rejects it for new save or publication", () => {
+    const legacy = structuredClone(def);
+    legacy.blocks[0].questions.push({ code: "legacy_click", type: "first_click", label: { en: "Legacy" }, imageUrl: "/legacy.png", required: false });
+    const parsed = instrumentDefinition.parse(legacy);
+    expect(parsed.blocks[0].questions.at(-1)?.imageUrl).toBe("/legacy.png");
+    expect(validateInstrument(parsed)).toContain("Question 'legacy_click' uses legacy imageUrl. Upload a protected media asset before saving or publishing a new draft.");
+  });
   it("starts at the first question", () => {
     const step = nextStep(def, null, {});
     expect(step.kind).toBe("question");

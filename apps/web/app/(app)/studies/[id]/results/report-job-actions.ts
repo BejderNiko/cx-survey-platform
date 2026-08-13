@@ -1,6 +1,5 @@
 "use server";
 
-import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { allQuestions, computeNps, instrumentDefinition, lt } from "@ok/domain";
 import { audit } from "@/lib/audit";
@@ -8,14 +7,43 @@ import { withAuthorized } from "@/lib/auth";
 import type { ReportSnapshot } from "@/lib/office-report";
 import { buildPrototypePaths, type PrototypeInteractionRow } from "@/lib/prototype-results";
 import { loadLatestResultData } from "@/lib/results-data";
-import { filterResponses, parseResultFilters, RESULT_RESPONSE_LIMIT, type FilterableResponse } from "@/lib/results-filters";
-import { deleteStimulusObject, putStimulusObject } from "@/lib/stimulus-storage";
+import { filterResponses, parseResultFiltersDetailed, RESULT_RESPONSE_LIMIT, type FilterableResponse } from "@/lib/results-filters";
 
 const TEMPLATE_REFERENCE = String.raw`\\ok.dk\data\CX_og_Market_Insights\Brugerundersøgelser\Skabelon til afrapporteringer CX & Market Insights.pdf`;
 
+export async function renamePrototypePath(input: { studyId: string; studyVersionId: string; questionCode: string; signature: string; label: string }): Promise<{ ok: true } | { ok: false; error: string }> {
+  const label = input.label.trim();
+  if (!/^[a-z][a-z0-9_]{0,63}$/.test(input.questionCode)) return { ok: false, error: "Ugyldig question code." };
+  if (!label || label.length > 80) return { ok: false, error: "Path-navn skal være 1-80 tegn." };
+  if (input.signature.length < 1 || input.signature.length > 4_000 || !/^[A-Za-z0-9:_-]+(?:→[A-Za-z0-9:_-]+)*$/.test(input.signature)) return { ok: false, error: "Ugyldig path-signatur." };
+  try {
+    await withAuthorized("reports.create", async (tx, session) => {
+      const data = await loadLatestResultData(tx, session.orgId, input.studyId);
+      if (!data?.version || String(data.version.id) !== input.studyVersionId) throw new Error("Resultatversionen er ikke længere aktuel.");
+      const definition = instrumentDefinition.parse(data.version.definition);
+      const question = allQuestions(definition).find((candidate) => candidate.code === input.questionCode && candidate.type === "prototype_test");
+      if (!question) throw new Error("Prototype-spørgsmålet findes ikke i versionen.");
+      const rows: PrototypeInteractionRow[] = data.interactions.map((row) => ({ responseId: String(row.response_id), questionCode: String(row.question_code), eventType: String(row.event_type), payload: row.payload as Record<string, unknown> }));
+      if (!buildPrototypePaths(rows, input.questionCode).some((path) => path.signature === input.signature)) throw new Error("Path-signaturen findes ikke i den aktuelle bounded resultatbase.");
+      await tx`
+        insert into prototype_path_labels (org_id, study_id, study_version_id, question_code, path_signature, label, updated_by)
+        values (${session.orgId}, ${input.studyId}, ${input.studyVersionId}, ${input.questionCode}, ${input.signature}, ${label}, ${session.userId})
+        on conflict (org_id, study_version_id, question_code, (encode(sha256(convert_to(path_signature, 'UTF8')), 'hex')))
+        do update set label = excluded.label, updated_by = excluded.updated_by, updated_at = now()`;
+      await audit(tx, { orgId: session.orgId, actorUserId: session.userId, action: "prototype_path.rename", entityType: "study_version", entityId: input.studyVersionId, details: { studyId: input.studyId, questionCode: input.questionCode, signatureLength: input.signature.length, label } });
+    });
+    revalidatePath(`/studies/${input.studyId}/results`);
+    return { ok: true };
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "42P01") return { ok: false, error: "Migration 20260812000013 er ikke anvendt." };
+    return { ok: false, error: error instanceof Error ? error.message : "Path-navnet kunne ikke gemmes." };
+  }
+}
 export async function requestReportJob(input: { studyId: string; format: "docx" | "pptx"; filters?: string }): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   if (!new Set(["docx", "pptx"]).has(input.format)) return { ok: false, error: "Ugyldigt rapportformat." };
-  const filters = parseResultFilters(input.filters);
+  const parsedFilters = parseResultFiltersDetailed(input.filters);
+  if (!parsedFilters.ok) return { ok: false, error: parsedFilters.message };
+  const filters = parsedFilters.filters;
   try {
     const id = await withAuthorized("reports.create", async (tx, session) => {
       const data = await loadLatestResultData(tx, session.orgId, input.studyId);

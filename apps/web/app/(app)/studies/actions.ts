@@ -43,6 +43,8 @@ export async function createStudy(input: {
       const [tpl] = await tx`select definition, category from templates where id = ${input.templateId}`;
       if (tpl) {
         definition = toDanishDraft(instrumentDefinition.parse(tpl.definition));
+        const legacyTemplateMediaProblem = validateInstrument(definition).find((problem) => problem.includes("uses legacy imageUrl"));
+        if (legacyTemplateMediaProblem) throw new Error(legacyTemplateMediaProblem);
         methodTags = [tpl.category as string];
       }
     }
@@ -64,6 +66,8 @@ export async function createStudy(input: {
 export async function updateDraft(studyId: string, definitionRaw: unknown, titleRaw?: string) {
   const def = toDanishDraft(instrumentDefinition.parse(definitionRaw));
   const problems = validateInstrument(def);
+  const legacyMediaProblem = problems.find((problem) => problem.includes("uses legacy imageUrl"));
+  if (legacyMediaProblem) throw new Error(legacyMediaProblem);
   if (problems.includes(INCOMPLETE_LOGIC_CONDITION_MESSAGE)) {
     throw new Error(INCOMPLETE_LOGIC_CONDITION_MESSAGE);
   }
@@ -225,6 +229,8 @@ export async function duplicateStudy(studyId: string) {
                            from studies where id = ${studyId} and org_id = ${session.orgId}`;
     if (!src) throw new Error("Studiet blev ikke fundet");
     const draftDefinition = toDanishDraft(instrumentDefinition.parse(src.draft_definition));
+    const legacyCopyMediaProblem = validateInstrument(draftDefinition).find((problem) => problem.includes("uses legacy imageUrl"));
+    if (legacyCopyMediaProblem) throw new Error(legacyCopyMediaProblem);
     const [copy] = await tx`
       insert into studies (org_id, workspace_id, title, study_type, method_tags, status, owner_id,
                            draft_definition, theme, settings)

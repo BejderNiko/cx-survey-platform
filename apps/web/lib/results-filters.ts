@@ -20,8 +20,8 @@ export interface FilterableResponse {
 
 export const RESULT_RESPONSE_LIMIT = 50_000;
 
-const MAX_FILTERS = 20;
-const MAX_SERIALIZED_LENGTH = 8_000;
+export const MAX_RESULT_FILTERS = 64;
+export const MAX_RESULT_FILTER_PAYLOAD = 16_000;
 const BOUNDED_VALUE = 500;
 
 export function resultFilterKey(filter: ResultFilter): string {
@@ -32,44 +32,126 @@ export function resultFilterKey(filter: ResultFilter): string {
   return `tag:${filter.value}`;
 }
 
-export function parseResultFilters(raw: string | undefined): ResultFilter[] {
-  if (!raw || raw.length > MAX_SERIALIZED_LENGTH) return [];
+export type ResultFilterCodecError = "invalid" | "too_many" | "too_large";
+export type ResultFilterParseResult =
+  | { ok: true; filters: ResultFilter[] }
+  | { ok: false; filters: []; error: ResultFilterCodecError; message: string };
+export type ResultFilterSerializeResult =
+  | { ok: true; value: string }
+  | { ok: false; error: ResultFilterCodecError; message: string };
+
+type CompactResultFilter =
+  | ["a", string, string]
+  | ["t", string]
+  | ["p", string, string]
+  | ["r", string]
+  | ["f", ResultFacet, string];
+
+export function resultFilterCodecMessage(error: ResultFilterCodecError): string {
+  if (error === "too_many") return `Filtertilstanden har flere end ${MAX_RESULT_FILTERS} filtre. Fjern et filter før du tilføjer et nyt.`;
+  if (error === "too_large") return `Filtertilstanden fylder mere end ${MAX_RESULT_FILTER_PAYLOAD.toLocaleString("da-DK")} tegn. Fjern et filter eller brug en kortere prototype-path.`;
+  return "Filterlinket er ugyldigt eller beskadiget. Ingen eksport eller rapport er kørt.";
+}
+
+export function parseResultFiltersDetailed(raw: string | undefined): ResultFilterParseResult {
+  if (!raw) return { ok: true, filters: [] };
+  if (raw.length > MAX_RESULT_FILTER_PAYLOAD) return parseFailure("too_large");
   try {
     const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    const result: ResultFilter[] = [];
+    const entries = compactEntries(parsed) ?? legacyEntries(parsed);
+    if (!entries) return parseFailure("invalid");
+    if (entries.length > MAX_RESULT_FILTERS) return parseFailure("too_many");
+    const filters: ResultFilter[] = [];
     const seen = new Set<string>();
-    for (const entry of parsed.slice(0, MAX_FILTERS)) {
-      if (!entry || typeof entry !== "object") continue;
-      const value = entry as Record<string, unknown>;
-      const kind = value.kind;
-      let filter: ResultFilter | null = null;
-      if (kind === "tag" && bounded(value.value)) filter = { kind, value: value.value };
-      if (kind === "answer" && bounded(value.questionCode, 64) && bounded(value.value)) {
-        filter = { kind, questionCode: value.questionCode, value: value.value };
-      }
-      if (kind === "respondent" && bounded(value.responseId, 64)) filter = { kind, responseId: value.responseId };
-      if (kind === "path" && bounded(value.questionCode, 64) && bounded(value.signature, 4_000)) {
-        filter = { kind, questionCode: value.questionCode, signature: value.signature };
-      }
-      if (kind === "facet" && RESULT_FACETS.includes(value.facet as ResultFacet) && bounded(value.value)) {
-        filter = { kind, facet: value.facet as ResultFacet, value: value.value };
-      }
-      if (filter && !seen.has(resultFilterKey(filter))) {
-        result.push(filter);
-        seen.add(resultFilterKey(filter));
-      }
+    for (const entry of entries) {
+      const filter = decodeResultFilter(entry);
+      if (!filter) return parseFailure("invalid");
+      const key = resultFilterKey(filter);
+      if (seen.has(key)) return parseFailure("invalid");
+      seen.add(key);
+      filters.push(filter);
     }
-    return result;
+    return { ok: true, filters };
   } catch {
-    return [];
+    return parseFailure("invalid");
   }
 }
 
-export function serializeResultFilters(filters: ResultFilter[]): string {
-  return JSON.stringify(filters.slice(0, MAX_FILTERS));
+export function parseResultFilters(raw: string | undefined): ResultFilter[] {
+  const result = parseResultFiltersDetailed(raw);
+  if (!result.ok) throw new Error(result.message);
+  return result.filters;
 }
 
+export function trySerializeResultFilters(filters: ResultFilter[]): ResultFilterSerializeResult {
+  if (filters.length > MAX_RESULT_FILTERS) return serializeFailure("too_many");
+  const compact: CompactResultFilter[] = [];
+  const seen = new Set<string>();
+  for (const filter of filters) {
+    const encoded = encodeResultFilter(filter);
+    if (!encoded) return serializeFailure("invalid");
+    const key = resultFilterKey(filter);
+    if (seen.has(key)) return serializeFailure("invalid");
+    seen.add(key);
+    compact.push(encoded);
+  }
+  const value = JSON.stringify([1, compact]);
+  if (value.length > MAX_RESULT_FILTER_PAYLOAD) return serializeFailure("too_large");
+  const roundtrip = parseResultFiltersDetailed(value);
+  if (!roundtrip.ok || roundtrip.filters.length !== filters.length) return serializeFailure("invalid");
+  return { ok: true, value };
+}
+
+export function serializeResultFilters(filters: ResultFilter[]): string {
+  const result = trySerializeResultFilters(filters);
+  if (!result.ok) throw new Error(result.message);
+  return result.value;
+}
+
+function compactEntries(value: unknown): unknown[] | null {
+  if (!Array.isArray(value) || value.length !== 2 || value[0] !== 1 || !Array.isArray(value[1])) return null;
+  return value[1];
+}
+
+function legacyEntries(value: unknown): unknown[] | null {
+  return Array.isArray(value) && value[0] !== 1 ? value : null;
+}
+
+function decodeResultFilter(entry: unknown): ResultFilter | null {
+  if (Array.isArray(entry)) {
+    if (entry[0] === "a" && entry.length === 3 && bounded(entry[1], 64) && bounded(entry[2])) return { kind: "answer", questionCode: entry[1], value: entry[2] };
+    if (entry[0] === "t" && entry.length === 2 && bounded(entry[1])) return { kind: "tag", value: entry[1] };
+    if (entry[0] === "p" && entry.length === 3 && bounded(entry[1], 64) && bounded(entry[2], 4_000)) return { kind: "path", questionCode: entry[1], signature: entry[2] };
+    if (entry[0] === "r" && entry.length === 2 && bounded(entry[1], 64)) return { kind: "respondent", responseId: entry[1] };
+    if (entry[0] === "f" && entry.length === 3 && RESULT_FACETS.includes(entry[1] as ResultFacet) && bounded(entry[2])) return { kind: "facet", facet: entry[1] as ResultFacet, value: entry[2] };
+    return null;
+  }
+  if (!entry || typeof entry !== "object") return null;
+  const value = entry as Record<string, unknown>;
+  if (value.kind === "tag" && bounded(value.value)) return { kind: "tag", value: value.value };
+  if (value.kind === "answer" && bounded(value.questionCode, 64) && bounded(value.value)) return { kind: "answer", questionCode: value.questionCode, value: value.value };
+  if (value.kind === "respondent" && bounded(value.responseId, 64)) return { kind: "respondent", responseId: value.responseId };
+  if (value.kind === "path" && bounded(value.questionCode, 64) && bounded(value.signature, 4_000)) return { kind: "path", questionCode: value.questionCode, signature: value.signature };
+  if (value.kind === "facet" && RESULT_FACETS.includes(value.facet as ResultFacet) && bounded(value.value)) return { kind: "facet", facet: value.facet as ResultFacet, value: value.value };
+  return null;
+}
+
+function encodeResultFilter(filter: ResultFilter): CompactResultFilter | null {
+  if (filter.kind === "answer" && bounded(filter.questionCode, 64) && bounded(filter.value)) return ["a", filter.questionCode, filter.value];
+  if (filter.kind === "tag" && bounded(filter.value)) return ["t", filter.value];
+  if (filter.kind === "path" && bounded(filter.questionCode, 64) && bounded(filter.signature, 4_000)) return ["p", filter.questionCode, filter.signature];
+  if (filter.kind === "respondent" && bounded(filter.responseId, 64)) return ["r", filter.responseId];
+  if (filter.kind === "facet" && RESULT_FACETS.includes(filter.facet) && bounded(filter.value)) return ["f", filter.facet, filter.value];
+  return null;
+}
+
+function parseFailure(error: ResultFilterCodecError): ResultFilterParseResult {
+  return { ok: false, filters: [], error, message: resultFilterCodecMessage(error) };
+}
+
+function serializeFailure(error: ResultFilterCodecError): ResultFilterSerializeResult {
+  return { ok: false, error, message: resultFilterCodecMessage(error) };
+}
 export function responseMatchesFilter(response: FilterableResponse, filter: ResultFilter): boolean {
   if (filter.kind === "tag") return response.tags.includes(filter.value);
   if (filter.kind === "path") return response.paths[filter.questionCode] === filter.signature;
@@ -148,7 +230,7 @@ export function mergeResultFilters(existing: ResultFilter[], additions: ResultFi
     if (filter.kind === "facet") result = result.filter((item) => item.kind !== "facet" || item.facet !== filter.facet);
     if (!result.some((item) => resultFilterKey(item) === resultFilterKey(filter))) result.push(filter);
   }
-  return result.slice(0, MAX_FILTERS);
+  return result;
 }
 
 export function draftFiltersFromNaturalLanguage(

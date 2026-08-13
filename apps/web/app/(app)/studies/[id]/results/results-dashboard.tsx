@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { allQuestions, assertCan, computeNps, instrumentDefinition, lt, type Question } from "@ok/domain";
+import { allQuestions, assertCan, can, computeNps, instrumentDefinition, lt, type Question } from "@ok/domain";
 import { Card, KpiTile, Table, Td, Th } from "@/components/ui";
 import { requireSession } from "@/lib/auth";
 import { withUser } from "@/lib/db";
@@ -14,18 +14,20 @@ import {
   facetLabel,
   filterResponses,
   mergeResultFilters,
-  parseResultFilters,
+  parseResultFiltersDetailed,
   RESULT_FACETS,
+  resultFilterCodecMessage,
   resultFilterKey,
   resultFilterLabel,
   serializeResultFilters,
+  trySerializeResultFilters,
   tagFacetCounts,
   type FilterableResponse,
   type ResultFilter,
 } from "@/lib/results-filters";
 import { ReportJobs } from "./report-jobs";
 
-type Search = { filters?: string; ask?: string };
+type Search = { filters?: string; ask?: string; filterError?: string };
 
 export async function ResultsDashboard({ studyId, search }: { studyId: string; search: Search }) {
   const session = await requireSession();
@@ -33,6 +35,11 @@ export async function ResultsDashboard({ studyId, search }: { studyId: string; s
   const data = await withUser(session.userId, session.orgId, (tx) => loadLatestResultData(tx, session.orgId, studyId));
   if (!data) notFound();
 
+  const pathLabelRows = data.version ? await withUser(session.userId, session.orgId, (tx) => tx`select question_code, path_signature, label from prototype_path_labels where org_id = ${session.orgId} and study_version_id = ${data.version.id}`).catch((error) => {
+    if (error && typeof error === "object" && "code" in error && error.code === "42P01") return [];
+    throw error;
+  }) : [];
+  const pathLabels = new Map(pathLabelRows.map((row) => [`${row.question_code}\u0000${row.path_signature}`, String(row.label)]));
   const parsed = instrumentDefinition.safeParse(data.version?.definition ?? data.study.draft_definition);
   if (!parsed.success) return <Card title="Studiedata kunne ikke læses"><p role="alert">Instrumentet er ugyldigt.</p></Card>;
   const definition = parsed.data;
@@ -66,11 +73,18 @@ export async function ResultsDashboard({ studyId, search }: { studyId: string; s
     } satisfies FilterableResponse & { source: typeof row };
   });
 
-  const filters = parseResultFilters(search.filters);
+  const parsedFilterState = parseResultFiltersDetailed(search.filters);
+  const filters = parsedFilterState.filters;
+  const filterError = !parsedFilterState.ok
+    ? parsedFilterState.message
+    : search.filterError && ["invalid", "too_many", "too_large"].includes(search.filterError)
+      ? resultFilterCodecMessage(search.filterError as "invalid" | "too_many" | "too_large")
+      : null;
+  const serializedFilters = serializeResultFilters(filters);
   const filtered = filterResponses(responseRows, filters);
   const filteredIds = new Set(filtered.map((response) => response.id));
   const questionValues = (code: string) => filtered.flatMap((response) => response.answers[code] === undefined ? [] : [response.answers[code]]);
-  const hrefFor = (nextFilters: ResultFilter[]) => resultHref(studyId, nextFilters);
+  const hrefFor = (nextFilters: ResultFilter[]) => resultHref(studyId, nextFilters, filters);
   const insightDraft = search.ask ? buildInsightDraft(search.ask, definition, questionValues) : null;
   const draft = search.ask && !insightDraft ? draftFiltersFromNaturalLanguage(search.ask, definition) : null;
   const draftFilters = draft?.filters ?? [];
@@ -86,10 +100,11 @@ export async function ResultsDashboard({ studyId, search }: { studyId: string; s
         <KpiTile label={filters.length ? "Svar vist - FILTRERET" : "Svar vist"} value={String(filtered.length)} hint={`${filtered.length} / ${responseRows.length} gennemførte`} />
         <KpiTile label="Deltagere" value={String(responseRows.length)} hint="Bounded version-population" />
         <KpiTile label="Andel vist" value={`${fmtNumber(responseRows.length ? filtered.length / responseRows.length * 100 : 0, 1)} %`} hint={`${filtered.length} ÷ ${responseRows.length || 0}`} />
-        <KpiTile label="Status" value={String(data.study.status)} hint={`${filters.length} / 20 aktive filtre`} />
+        <KpiTile label="Status" value={String(data.study.status)} hint={`${filters.length} aktive filtre`} />
       </div>
 
       <Card title="Globale filtre">
+        {filterError && <p role="alert" className="mb-3 rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-800">{filterError} Den ønskede filterændring er ikke anvendt; gyldige aktive filtre er bevaret.</p>}
         <div className="flex flex-wrap gap-2">
           {filters.map((filter) => (
             <Link key={resultFilterKey(filter)} href={hrefFor(filters.filter((item) => resultFilterKey(item) !== resultFilterKey(filter)))} className="rounded-full border border-accent/30 bg-accent-soft px-3 py-1 text-xs text-accent">
@@ -100,7 +115,7 @@ export async function ResultsDashboard({ studyId, search }: { studyId: string; s
         </div>
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
           <form action={`/studies/${studyId}/results`} className="space-y-2">
-            {filters.length > 0 && <input type="hidden" name="filters" value={serializeResultFilters(filters)} />}
+            {filters.length > 0 && <input type="hidden" name="filters" value={serializedFilters} />}
             <label className="block text-xs font-semibold">Filter- eller indsigtønske i naturligt sprog</label>
             <div className="flex gap-2">
               <input name="ask" defaultValue={search.ask ?? ""} maxLength={500} placeholder="Fx nps = 10, tag = Elbil eller indsigt om nps" className="h-9 min-w-0 flex-1 rounded-md border border-line bg-surface px-3 text-sm" />
@@ -120,11 +135,11 @@ export async function ResultsDashboard({ studyId, search }: { studyId: string; s
             {dynamicTagCounts.map((entry) => <Link key={entry.value} href={hrefFor(mergeResultFilters(filters, [{ kind: "tag", value: entry.value }]))} className={`rounded-full border px-2 py-1 text-xs ${entry.active ? "border-accent bg-accent-soft text-accent" : "border-line"}`}>⌁ {entry.value} · {entry.matching} OF {entry.total}</Link>)}
           </div></div>
         </div>
-        <p className="mt-3 text-xs text-muted">Facetter viser op til alle værdier; lange lister kan åbnes/lukkes med browserens Details-kontrol. X = matcher facetværdien efter øvrige aktive filtre. Y = hele bounded version-populationen. Valg inden for samme facet erstatter tidligere valg; filtre på tværs kombineres med AND.</p>
+        <p className="mt-3 text-xs text-muted">Manuelle filtre kan stakkes; kompakt, versionsstyret encoding understøtter højst 64 filtre og 16.000 serialiserede tegn. Hvis tilstanden bliver større, beholdes aktive filtre og UI viser en fejl i stedet for at nulstille dem. Facetter viser op til alle værdier; lange lister kan åbnes/lukkes med browserens Details-kontrol. X = matcher facetværdien efter øvrige aktive filtre. Y = hele bounded version-populationen. Valg inden for samme facet erstatter tidligere valg; filtre på tværs kombineres med AND.</p>
       </Card>
 
       {allQuestions(definition).map((question) => question.type === "prototype_test" ? (
-        <PrototypeResult key={question.code} studyId={studyId} question={question} values={questionValues(question.code)} paths={(pathsByQuestion.get(question.code) ?? []).filter((path) => filteredIds.has(path.responseId))} filters={filters} />
+        <PrototypeResult key={question.code} studyId={studyId} studyVersionId={data.version ? String(data.version.id) : ""} question={question} values={questionValues(question.code)} paths={(pathsByQuestion.get(question.code) ?? []).filter((path) => filteredIds.has(path.responseId))} filters={filters} canRenamePaths={can(session.role, "reports.create")} pathLabels={Object.fromEntries([...pathLabels].filter(([key]) => key.startsWith(`${question.code}\u0000`)).map(([key, value]) => [key.slice(question.code.length + 1), value]))} />
       ) : (
         <QuestionResult key={question.code} question={question} values={questionValues(question.code)} filters={filters} hrefFor={hrefFor} />
       ))}
@@ -134,7 +149,7 @@ export async function ResultsDashboard({ studyId, search }: { studyId: string; s
       <Card title={`Individuelle besvarelser (${filtered.length})`}>
         <div className="mb-3 flex items-center justify-between gap-2">
           <p className="text-xs text-muted">Samme base som kort og diagrammer: n = {filtered.length}.</p>
-          <Link href={`/api/studies/${studyId}/results/export?filters=${encodeURIComponent(serializeResultFilters(filters))}`} className="rounded-md border border-line px-3 py-2 text-sm">{filtered.length} · Eksportér CSV</Link>
+          <Link href={`/api/studies/${studyId}/results/export?filters=${encodeURIComponent(serializedFilters)}`} className="rounded-md border border-line px-3 py-2 text-sm">{filtered.length} · Eksportér CSV</Link>
         </div>
         <Table><thead><tr><Th>Respondent</Th><Th>Version</Th><Th>Tags</Th><Th>Kanal</Th><Th>Påbegyndt</Th></tr></thead><tbody>
           {filtered.slice(0, 200).map(({ id, source }) => <tr key={id}>
@@ -176,7 +191,7 @@ function Bars({ question, options, values, filters, hrefFor }: { question: Quest
   })}</div>;
 }
 
-function PrototypeResult({ studyId, question, values, paths, filters }: { studyId: string; question: Question; values: unknown[]; paths: ReturnType<typeof buildPrototypePaths>; filters: ResultFilter[] }) {
+function PrototypeResult({ studyId, studyVersionId, question, values, paths, filters, canRenamePaths, pathLabels }: { studyId: string; studyVersionId: string; question: Question; values: unknown[]; paths: ReturnType<typeof buildPrototypePaths>; filters: ResultFilter[]; canRenamePaths: boolean; pathLabels: Record<string, string> }) {
   const groups = groupCommonPaths(paths);
   const goalFrameId = question.prototype?.goalFrameId;
   const successes = goalFrameId ? paths.filter((path) => path.frames.includes(goalFrameId)).length : 0;
@@ -186,7 +201,7 @@ function PrototypeResult({ studyId, question, values, paths, filters }: { studyI
   const screenshots = (question.prototype?.frameScreenshots ?? []).flatMap((entry) => entry.screenshot ? [{ frameId: entry.frameId, frameName: entry.frameName, assetId: entry.screenshot.assetId, coordinateScale: entry.coordinateScale }] : []);
   return <Card title={`${lt(question.label, "da") || question.code} · Prototype paths`}>
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-5"><KpiTile label={question.prototype?.flowType === "free" ? "Flow" : "Mål nået"} value={question.prototype?.flowType === "free" ? "Free" : `${values.length ? fmtNumber(successes / values.length * 100, 1) : 0} %`} hint={question.prototype?.flowType === "free" ? "Intet goal-krav" : `${successes} ÷ ${values.length}`} /><KpiTile label="Deltagere" value={String(values.length)} /><KpiTile label="Gennemsnitstid" value={`${fmtNumber(averageElapsedMs / 1000, 1)} s`} hint={`${fmtNumber(paths.reduce((sum, path) => sum + path.elapsedMs, 0) / 1000, 1)} s ÷ ${paths.length}`} /><KpiTile label="Klik" value={String(clicks.length)} hint={`${misclicks} fejlklik · ${clicks.length ? fmtNumber(misclicks / clicks.length * 100, 1) : 0} %`} /><KpiTile label="Fælles paths" value={String(groups.length)} /></div>
-    <PrototypeResultView studyId={studyId} questionCode={question.code} flowType={question.prototype?.flowType ?? "task"} goalFrameId={goalFrameId} paths={paths} filters={filters} screenshots={screenshots} />
+    <PrototypeResultView studyId={studyId} studyVersionId={studyVersionId} questionCode={question.code} flowType={question.prototype?.flowType ?? "task"} goalFrameId={goalFrameId} paths={paths} filters={filters} screenshots={screenshots} canRenamePaths={canRenamePaths} pathLabels={pathLabels} />
     <p className="mt-3 text-xs text-muted">Path-succes beregnes som ‘goal frame set mindst én gang’. Screenshot-overlay bruger kun godkendte private-storage assets. Koordinatskala skal matche Figma-frame og screenshot-export; live alignment er ikke verificeret uden rigtig prototype.</p>
   </Card>;
 }
@@ -239,7 +254,15 @@ function mergeFilters(existing: ResultFilter[], additions: ResultFilter[]): Resu
   return mergeResultFilters(existing, additions);
 }
 
-function resultHref(studyId: string, filters: ResultFilter[]): string {
-  const query = filters.length ? `?filters=${encodeURIComponent(serializeResultFilters(filters))}` : "";
-  return `/studies/${studyId}/results${query}`;
+function resultHref(studyId: string, filters: ResultFilter[], currentFilters: ResultFilter[]): string {
+  const serialized = trySerializeResultFilters(filters);
+  if (serialized.ok) {
+    const query = filters.length ? `?filters=${encodeURIComponent(serialized.value)}` : "";
+    return `/studies/${studyId}/results${query}`;
+  }
+  const fallback = serializeResultFilters(currentFilters);
+  const params = new URLSearchParams();
+  if (currentFilters.length) params.set("filters", fallback);
+  params.set("filterError", serialized.error);
+  return `/studies/${studyId}/results?${params}`;
 }

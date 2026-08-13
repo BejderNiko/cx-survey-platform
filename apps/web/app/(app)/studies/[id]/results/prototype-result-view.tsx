@@ -2,30 +2,37 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import type { PrototypePath } from "@/lib/prototype-results";
 import { groupCommonPaths } from "@/lib/prototype-results";
 import type { ResultFilter } from "@/lib/results-filters";
-import { mergeResultFilters, serializeResultFilters } from "@/lib/results-filters";
+import { mergeResultFilters, trySerializeResultFilters } from "@/lib/results-filters";
+import { renamePrototypePath } from "./report-job-actions";
 
 type Screenshot = { frameId: string; frameName: string; assetId: string; coordinateScale: number };
 type ModalFrame = { frameId: string; durationMs: number; clicks: PrototypePath["clicks"] };
 
 export function PrototypeResultView({
-  studyId, questionCode, flowType, goalFrameId, paths, filters, screenshots,
+  studyId, studyVersionId, questionCode, flowType, goalFrameId, paths, filters, screenshots, canRenamePaths, pathLabels,
 }: {
   studyId: string;
+  studyVersionId: string;
   questionCode: string;
   flowType: "task" | "free";
   goalFrameId?: string;
   paths: PrototypePath[];
   filters: ResultFilter[];
   screenshots: Screenshot[];
+  canRenamePaths: boolean;
+  pathLabels: Record<string, string>;
 }) {
   const [mode, setMode] = useState<"common" | "individual">("common");
   const [sort, setSort] = useState<"participants" | "time" | "clicks">("participants");
   const [expanded, setExpanded] = useState(false);
-  const [names, setNames] = useState<Record<string, string>>({});
+  const [names, setNames] = useState<Record<string, string>>(pathLabels);
+  const [savedNames, setSavedNames] = useState<Record<string, string>>(pathLabels);
+  const [renamePending, startRename] = useTransition();
+  const [renameStatus, setRenameStatus] = useState<{ message: string; error: boolean } | null>(null);
   const [modal, setModal] = useState<{ frames: ModalFrame[]; index: number } | null>(null);
   const [tab, setTab] = useState<"image" | "heatmap" | "clicks">("image");
   const [clickScope, setClickScope] = useState<"all" | "misclicks">("all");
@@ -57,6 +64,26 @@ export function PrototypeResultView({
   const activeFrame = modal?.frames[modal.index];
   const activeScreenshot = activeFrame ? screenshotsByFrame.get(activeFrame.frameId) : undefined;
   const visibleClicks = activeFrame ? (clickScope === "misclicks" ? activeFrame.clicks.filter((click) => click.isMisclick) : activeFrame.clicks) : [];
+  const savePathName = (signature: string, label: string, fallback: string) => {
+    const previous = savedNames[signature] ?? fallback;
+    setRenameStatus(null);
+    startRename(async () => {
+      try {
+        const result = await renamePrototypePath({ studyId, studyVersionId, questionCode, signature, label });
+        if (!result.ok) {
+          setNames((current) => ({ ...current, [signature]: previous }));
+          setRenameStatus({ message: result.error, error: true });
+          return;
+        }
+        setSavedNames((current) => ({ ...current, [signature]: label }));
+        setNames((current) => ({ ...current, [signature]: label }));
+        setRenameStatus({ message: "Path-navn gemt.", error: false });
+      } catch {
+        setNames((current) => ({ ...current, [signature]: previous }));
+        setRenameStatus({ message: "Path-navnet kunne ikke gemmes. Tidligere navn er gendannet.", error: true });
+      }
+    });
+  };
 
   return <div className="mt-4 space-y-3">
     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -71,11 +98,13 @@ export function PrototypeResultView({
       const pathFilter: ResultFilter = mode === "individual"
         ? { kind: "respondent", responseId: row.key }
         : { kind: "path", questionCode, signature: row.signature };
-      const filterHref = `/studies/${studyId}/results?filters=${encodeURIComponent(serializeResultFilters(mergeResultFilters(filters, [pathFilter])))}`;
+      const serializedFilter = trySerializeResultFilters(mergeResultFilters(filters, [pathFilter]));
+      const filterHref = serializedFilter.ok ? `/studies/${studyId}/results?filters=${encodeURIComponent(serializedFilter.value)}` : null;
+      const filterError = serializedFilter.ok ? null : serializedFilter.message;
       return <article key={row.key} className="rounded-lg border border-line p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2"><input aria-label="Path name" className="w-36 rounded border border-transparent bg-transparent px-1 text-sm font-semibold hover:border-line focus:border-line" value={names[row.key] ?? `${mode === "common" ? "Path" : "Participant"} ${index + 1}`} onChange={(event) => setNames((current) => ({ ...current, [row.key]: event.target.value.slice(0, 80) }))} /><span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${flowType === "free" || reachedGoal ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}`}>{flowType === "free" ? "FREE FLOW" : reachedGoal ? "REACHED GOAL SCREEN" : "DIDN'T REACH GOAL SCREEN"}</span></div>
-          <a href={filterHref} className="text-xs text-accent">⌁ Filter globalt</a>
+          <div className="flex items-center gap-2"><input aria-label="Path name" readOnly={mode !== "common" || !canRenamePaths || renamePending} className="w-36 rounded border border-transparent bg-transparent px-1 text-sm font-semibold hover:border-line focus:border-line read-only:cursor-default" value={mode === "common" ? names[row.signature] ?? `Path ${index + 1}` : `Participant ${index + 1}`} onChange={(event) => setNames((current) => ({ ...current, [row.signature]: event.target.value.slice(0, 80) }))} onBlur={(event) => { if (mode !== "common" || !canRenamePaths || !studyVersionId) return; const fallback = pathLabels[row.signature] ?? `Path ${index + 1}`; const label = event.target.value.trim(); if (!label) { setNames((current) => ({ ...current, [row.signature]: savedNames[row.signature] ?? fallback })); return; } savePathName(row.signature, label, fallback); }} /><span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${flowType === "free" || reachedGoal ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}`}>{flowType === "free" ? "FREE FLOW" : reachedGoal ? "REACHED GOAL SCREEN" : "DIDN'T REACH GOAL SCREEN"}</span></div>
+          {filterHref ? <a href={filterHref} className="text-xs text-accent">⌁ Filter globalt</a> : <span role="alert" className="text-xs text-rose-700">{filterError}</span>}
         </div>
         <p className="mt-2 text-xs text-muted">{row.participantCount} participant(s) · {formatSeconds(row.elapsedMs)} · {row.clickCount} clicks · {misclickPercent(row.misclickCount, row.clickCount)} % misclicks</p>
         <div className="mt-3 flex gap-2 overflow-x-auto pb-2">
@@ -89,6 +118,7 @@ export function PrototypeResultView({
         </div>
       </article>;
     })}
+    {renameStatus && <p role={renameStatus.error ? "alert" : "status"} className={`text-xs ${renameStatus.error ? "text-rose-700" : "text-muted"}`}>{renameStatus.message}</p>}
     {rows.length > 10 && <button type="button" className="rounded-md border border-line px-3 py-1.5 text-xs" onClick={() => setExpanded((value) => !value)}>{expanded ? "Show top 10" : `Expand all ${rows.length}`}</button>}
     {modal && activeFrame && activeScreenshot && <div role="dialog" aria-modal="true" aria-label={`Frame ${activeScreenshot.frameName}`} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="max-h-[95vh] w-full max-w-6xl overflow-hidden rounded-xl bg-surface shadow-xl">

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildPrototypePaths, groupCommonPaths } from "../lib/prototype-results";
-import { facetCounts, filterResponses, mergeResultFilters, parseResultFilters } from "../lib/results-filters";
+import { facetCounts, filterResponses, mergeResultFilters, parseResultFilters, parseResultFiltersDetailed, serializeResultFilters, trySerializeResultFilters } from "../lib/results-filters";
 
 describe("global result filters", () => {
   const responses = [
@@ -30,9 +30,43 @@ describe("global result filters", () => {
       .toEqual([{ kind: "facet", facet: "location", value: "SE" }]);
   });
 
-  it("rejects oversized or malformed serialized filters", () => {
-    expect(parseResultFilters("x")).toEqual([]);
-    expect(parseResultFilters("[" + " ".repeat(9000) + "]")).toEqual([]);
+  it("roundtrips exactly 64 compact filters with long path signatures", () => {
+    const filters = Array.from({ length: 64 }, (_, index) => ({
+      kind: "path" as const,
+      questionCode: `prototype_${index}`,
+      signature: `${index}:${"frame".repeat(36)}`,
+    }));
+    const serialized = serializeResultFilters(filters);
+    expect(serialized.length).toBeLessThanOrEqual(16_000);
+    expect(parseResultFilters(serialized)).toEqual(filters);
+    expect(parseResultFiltersDetailed(serialized)).toEqual({ ok: true, filters });
+  });
+
+  it("roundtrips one maximum-length path signature", () => {
+    const filters = [{ kind: "path" as const, questionCode: "prototype", signature: "x".repeat(4_000) }];
+    const serialized = serializeResultFilters(filters);
+    expect(parseResultFilters(serialized)).toEqual(filters);
+  });
+
+  it("fails explicitly instead of emitting payloads the parser would reset", () => {
+    const oversized = Array.from({ length: 5 }, (_, index) => ({ kind: "path" as const, questionCode: `p${index}`, signature: `${index}${"x".repeat(3_999)}` }));
+    expect(trySerializeResultFilters(oversized)).toMatchObject({ ok: false, error: "too_large" });
+    expect(() => serializeResultFilters(oversized)).toThrow(/16\.000/);
+
+    const tooMany = Array.from({ length: 65 }, (_, index) => ({ kind: "answer" as const, questionCode: `q${index}`, value: `v${index}` }));
+    expect(mergeResultFilters([], tooMany)).toHaveLength(65);
+    expect(trySerializeResultFilters(tooMany)).toMatchObject({ ok: false, error: "too_many" });
+  });
+
+  it("reports malformed and oversized input instead of silently parsing as no filters", () => {
+    expect(parseResultFiltersDetailed("x")).toMatchObject({ ok: false, error: "invalid" });
+    expect(parseResultFiltersDetailed("[" + " ".repeat(17_000) + "]")).toMatchObject({ ok: false, error: "too_large" });
+    expect(() => parseResultFilters("x")).toThrow(/ugyldigt|beskadiget/);
+  });
+
+  it("keeps backward compatibility for valid legacy JSON filter links", () => {
+    const legacy = [{ kind: "answer" as const, questionCode: "q1", value: "yes" }];
+    expect(parseResultFilters(JSON.stringify(legacy))).toEqual(legacy);
   });
 });
 

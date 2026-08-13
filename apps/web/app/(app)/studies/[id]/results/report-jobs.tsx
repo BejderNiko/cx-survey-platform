@@ -31,7 +31,7 @@ export async function ReportJobs({ studyId, filters }: { studyId: string; filter
             Templateblokering: CX-template på \\ok.dk er ikke læsbar. Automatisk queue-worker bygger et strukturelt DRAFT_UNBRANDED-artefakt med checksum og lineage; det er ikke releaseklart eller template-verificeret før render og visuel QA.
           </p>
         </div>
-        <ReportJobButtons studyId={studyId} filters={serializeResultFilters(filters)} />
+        <ReportJobButtons studyId={studyId} filters={serializeResultFilters(filters)} manualWorkerEnabled={process.env.VERCEL_ENV !== "production" && !(process.env.NODE_ENV === "production" && !process.env.VERCEL)} />
       </div>
       <ul className="mt-3 space-y-1 text-xs">
         {jobs.map((job) => (

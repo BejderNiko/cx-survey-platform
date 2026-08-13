@@ -49,6 +49,9 @@ create table report_jobs (
   requested_by uuid not null references users(id),
   format report_format not null,
   status report_job_status not null default 'queued',
+  attempt_count integer not null default 0 check (attempt_count between 0 and 3),
+  lease_expires_at timestamptz,
+  last_error text check (last_error is null or length(last_error) <= 2000),
   input_snapshot jsonb not null check (pg_column_size(input_snapshot) <= 1048576),
   template_reference text,
   output_storage_key text,
@@ -64,10 +67,30 @@ create table report_jobs (
   completed_at timestamptz,
   foreign key (org_id, study_id) references studies(org_id, id) on delete cascade,
   check ((status = 'succeeded') = (output_storage_key is not null and output_sha256 is not null and output_byte_size is not null and output_content_type is not null and completed_at is not null)),
+  check ((status = 'running') = (lease_expires_at is not null)),
   check (error_message is null or length(error_message) <= 2000),
   foreign key (org_id, requested_by) references memberships(org_id, user_id)
 );
 create index report_jobs_study_idx on report_jobs (org_id, study_id, created_at desc);
+create index report_jobs_queue_idx on report_jobs (status, lease_expires_at, created_at) where status in ('queued','running');
+
+create table prototype_path_labels (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references organizations(id) on delete cascade,
+  study_id uuid not null,
+  study_version_id uuid not null,
+  question_code text not null check (question_code ~ '^[a-z][a-z0-9_]{0,63}$'),
+  path_signature text not null check (length(path_signature) between 1 and 4000),
+  label text not null check (length(trim(label)) between 1 and 80),
+  updated_by uuid not null references users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  foreign key (org_id, study_id, study_version_id) references study_versions(org_id, study_id, id) on delete cascade,
+  foreign key (org_id, updated_by) references memberships(org_id, user_id),
+  unique (org_id, id)
+);
+create unique index prototype_path_labels_signature_idx on prototype_path_labels
+  (org_id, study_version_id, question_code, (encode(sha256(convert_to(path_signature, 'UTF8')), 'hex')));
 
 alter table feature_requests enable row level security;
 alter table feature_requests force row level security;
@@ -75,15 +98,79 @@ alter table feature_request_events enable row level security;
 alter table feature_request_events force row level security;
 alter table report_jobs enable row level security;
 alter table report_jobs force row level security;
+alter table prototype_path_labels enable row level security;
+alter table prototype_path_labels force row level security;
 
-create policy feature_requests_tenant on feature_requests for all to authenticated
-  using (org_id in (select current_org_ids()))
-  with check (org_id in (select current_org_ids()));
-create policy feature_request_events_tenant on feature_request_events for all to authenticated
-  using (org_id in (select current_org_ids()))
-  with check (org_id in (select current_org_ids()));
-create policy report_jobs_tenant on report_jobs for all to authenticated
-  using (org_id in (select current_org_ids()))
+create policy feature_requests_select on feature_requests for select to authenticated
+  using (org_id in (select current_org_ids()));
+create policy feature_requests_insert on feature_requests for insert to authenticated
+  with check (
+    created_by = auth.uid() and exists (
+      select 1 from memberships m join users u on u.id = m.user_id
+      where m.org_id = feature_requests.org_id and m.user_id = auth.uid()
+        and m.deactivated_at is null and u.is_active and m.role in ('owner','administrator')
+    )
+  );
+create policy feature_requests_update on feature_requests for update to authenticated
+  using (exists (
+    select 1 from memberships m join users u on u.id = m.user_id
+    where m.org_id = feature_requests.org_id and m.user_id = auth.uid()
+      and m.deactivated_at is null and u.is_active and m.role in ('owner','administrator')
+  ))
   with check (org_id in (select current_org_ids()));
 
-grant select, insert, update, delete on feature_requests, feature_request_events, report_jobs to authenticated;
+create policy feature_request_events_select on feature_request_events for select to authenticated
+  using (org_id in (select current_org_ids()));
+create policy feature_request_events_insert on feature_request_events for insert to authenticated
+  with check (
+    actor_user_id = auth.uid() and exists (
+      select 1 from memberships m join users u on u.id = m.user_id
+      where m.org_id = feature_request_events.org_id and m.user_id = auth.uid()
+        and m.deactivated_at is null and u.is_active and m.role in ('owner','administrator')
+    )
+  );
+-- No UPDATE/DELETE policies: feature_request_events is append-only.
+
+create policy report_jobs_select on report_jobs for select to authenticated
+  using (exists (
+    select 1 from memberships m join users u on u.id = m.user_id
+    where m.org_id = report_jobs.org_id and m.user_id = auth.uid()
+      and m.deactivated_at is null and u.is_active and m.role in ('owner','administrator')
+  ));
+create policy report_jobs_insert on report_jobs for insert to authenticated
+  with check (
+    requested_by = auth.uid() and status = 'queued' and attempt_count = 0
+    and output_storage_key is null and lease_expires_at is null
+    and exists (
+      select 1 from memberships m join users u on u.id = m.user_id
+      where m.org_id = report_jobs.org_id and m.user_id = auth.uid()
+        and m.deactivated_at is null and u.is_active and m.role in ('owner','administrator')
+    )
+  );
+-- No authenticated UPDATE/DELETE policy: only privileged queue worker mutates lifecycle/output fields.
+
+create policy prototype_path_labels_select on prototype_path_labels for select to authenticated
+  using (org_id in (select current_org_ids()));
+create policy prototype_path_labels_insert on prototype_path_labels for insert to authenticated
+  with check (
+    updated_by = auth.uid() and exists (
+      select 1 from memberships m join users u on u.id = m.user_id
+      where m.org_id = prototype_path_labels.org_id and m.user_id = auth.uid()
+        and m.deactivated_at is null and u.is_active and m.role in ('owner','administrator')
+    )
+  );
+create policy prototype_path_labels_update on prototype_path_labels for update to authenticated
+  using (exists (
+    select 1 from memberships m join users u on u.id = m.user_id
+    where m.org_id = prototype_path_labels.org_id and m.user_id = auth.uid()
+      and m.deactivated_at is null and u.is_active and m.role in ('owner','administrator')
+  ))
+  with check (updated_by = auth.uid() and org_id in (select current_org_ids()));
+
+revoke all on feature_requests, feature_request_events, report_jobs, prototype_path_labels from authenticated;
+grant select, insert on feature_requests to authenticated;
+grant update (status, owner_id, updated_at) on feature_requests to authenticated;
+grant select, insert on feature_request_events to authenticated;
+grant select, insert on report_jobs to authenticated;
+grant select, insert on prototype_path_labels to authenticated;
+grant update (label, updated_by, updated_at) on prototype_path_labels to authenticated;

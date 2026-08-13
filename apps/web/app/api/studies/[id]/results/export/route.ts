@@ -3,7 +3,7 @@ import { getSession } from "@/lib/auth";
 import { withUser } from "@/lib/db";
 import { buildPrototypePaths, type PrototypeInteractionRow } from "@/lib/prototype-results";
 import { loadLatestResultData } from "@/lib/results-data";
-import { filterResponses, parseResultFilters, type FilterableResponse } from "@/lib/results-filters";
+import { filterResponses, parseResultFiltersDetailed, type FilterableResponse } from "@/lib/results-filters";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +12,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if (!session) return Response.json({ error: "unauthorized" }, { status: 401 });
   try { assertCan(session.role, "responses.view"); } catch { return Response.json({ error: "forbidden" }, { status: 403 }); }
   const { id } = await params;
-  const filters = parseResultFilters(new URL(request.url).searchParams.get("filters") ?? undefined);
+  const parsedFilters = parseResultFiltersDetailed(new URL(request.url).searchParams.get("filters") ?? undefined);
+  if (!parsedFilters.ok) return Response.json({ error: "invalid_filters", message: parsedFilters.message }, { status: 400 });
+  const filters = parsedFilters.filters;
   const data = await withUser(session.userId, session.orgId, (tx) => loadLatestResultData(tx, session.orgId, id));
   if (!data) return Response.json({ error: "not_found" }, { status: 404 });
   if (!data.version) return Response.json({ error: "no_published_version" }, { status: 409 });
