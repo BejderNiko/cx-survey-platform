@@ -6,7 +6,7 @@ const read = (relative: string) => readFileSync(path.resolve(process.cwd(), rela
 
 describe("new integration route security", () => {
   it("binds encrypted Figma access to session, active tenant draft, question and file key", () => {
-    for (const route of ["app/api/figma/connect/route.ts", "app/api/figma/callback/route.ts", "app/api/figma/frames/route.ts"]) {
+    for (const route of ["app/api/figma/connect/route.ts", "app/api/figma/callback/route.ts", "app/api/figma/frames/route.ts", "app/api/figma/thumbnail/route.ts"]) {
       const source = read(route);
       expect(source).toContain("getSession");
       expect(source).toContain("assertFigmaDraftAccess");
@@ -32,9 +32,14 @@ describe("new integration route security", () => {
     expect(builder).toContain("<FigmaFramePicker");
     expect(picker).toContain("connection?.configured");
     expect(picker).toContain('/api/figma/disconnect');
-    expect(picker).toContain("!config.fileKey || !connection?.connected");
-    expect(picker).toContain("new URLSearchParams({ fileKey: config.fileKey, studyId, questionCode })");
+    expect(picker).toContain("parseFigmaPrototypeUrl");
+    expect(picker).toContain("PRESENTED_NODE_CHANGED");
+    expect(picker).toContain("event.origin !== FIGMA_ORIGIN");
+    expect(picker).toContain("event.source !== iframeRef.current?.contentWindow");
+    expect(picker).toContain("/api/figma/thumbnail");
+    expect(picker).toContain("new URLSearchParams({ fileKey: config.fileKey, frameId, studyId, questionCode })");
     expect(picker).toContain('config.flowType === "task"');
+    expect(picker).toContain('currentFrame.id === config.startFrameId');
   });
 
   it("protects preview assets by capability hash and exact study/version linkage", () => {

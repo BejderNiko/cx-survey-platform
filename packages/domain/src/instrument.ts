@@ -94,9 +94,12 @@ export type StimulusAsset = z.infer<typeof stimulusAsset>;
 export const prototypeTestConfig = z.object({
   provider: z.literal("figma"),
   flowType: z.enum(["task", "free"]),
-  fileKey: z.string().trim().min(1).max(200),
+  // Empty values are valid while authoring a draft. validateInstrument keeps
+  // publication strict once the prototype must be runnable.
+  fileKey: z.string().trim().max(200),
   prototypeName: z.string().trim().max(200).optional(),
-  startFrameId: z.string().trim().min(1).max(200),
+  startFrameId: z.string().trim().max(200),
+  startFrameName: z.string().trim().max(200).optional(),
   goalFrameId: z.string().trim().min(1).max(200).optional(),
   goalFrameName: z.string().trim().max(200).optional(),
   scaling: z.enum(["scale-down", "contain", "min-zoom", "scale-down-width", "fit-width", "free", "fit", "width"]).default("scale-down"),
@@ -276,8 +279,17 @@ export function validateInstrument(def: InstrumentDefinition): string[] {
     }
     if (q.type === "prototype_test") {
       if (!q.prototype) problems.push(`Prototype test '${q.code}' is missing Figma configuration.`);
+      if (q.prototype && !q.prototype.fileKey) {
+        problems.push(`Prototype test '${q.code}' is missing a Figma prototype link.`);
+      }
+      if (q.prototype && !q.prototype.startFrameId) {
+        problems.push(`Prototype test '${q.code}' is missing a starting frame.`);
+      }
       if (q.prototype?.flowType === "task" && !q.prototype.goalFrameId) {
         problems.push(`Prototype test '${q.code}' is missing a goal frame.`);
+      }
+      if (q.prototype?.flowType === "task" && q.prototype.startFrameId && q.prototype.goalFrameId === q.prototype.startFrameId) {
+        problems.push(`Prototype test '${q.code}' must use different starting and goal frames.`);
       }
     }
   }

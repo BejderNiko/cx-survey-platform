@@ -20,7 +20,11 @@ export async function GET(request: Request) {
   }
   const response = await fetch(`https://api.figma.com/v1/files/${encodeURIComponent(fileKey)}?depth=2`, { headers: { authorization: `Bearer ${token}` }, cache: "no-store" });
   if (!response.ok) return Response.json({ error: "figma_file_unavailable" }, { status: response.status === 403 ? 403 : 502 });
-  const body = await response.json() as { name?: string; version?: string; document?: { children?: Array<{ children?: Array<{ id?: string; name?: string; type?: string }> }> } };
+  const body = await response.json() as { name?: string; version?: string; document?: { children?: Array<{ children?: Array<{ id?: string; name?: string; type?: string }>; flowStartingPoints?: Array<{ nodeId?: string; name?: string }>; prototypeStartNodeID?: string }> } };
   const frames = (body.document?.children ?? []).flatMap((page) => page.children ?? []).filter((node) => node.type === "FRAME" && node.id && node.name).slice(0, 500).map((node) => ({ id: node.id!, name: node.name! }));
-  return Response.json({ name: body.name ?? "", versionId: body.version ?? "", frames }, { headers: { "cache-control": "private, no-store" } });
+  const flowStartingPoints = (body.document?.children ?? []).flatMap((page) =>
+    page.flowStartingPoints?.flatMap((point) => point.nodeId ? [{ id: point.nodeId, name: point.name?.trim() || frames.find((frame) => frame.id === point.nodeId)?.name || `Flow ${point.nodeId}` }] : [])
+      ?? (page.prototypeStartNodeID ? [{ id: page.prototypeStartNodeID, name: frames.find((frame) => frame.id === page.prototypeStartNodeID)?.name || `Flow ${page.prototypeStartNodeID}` }] : []),
+  ).slice(0, 100);
+  return Response.json({ name: body.name ?? "", versionId: body.version ?? "", frames, flowStartingPoints }, { headers: { "cache-control": "private, no-store" } });
 }

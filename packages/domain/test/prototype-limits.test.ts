@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { instrumentDefinition, prototypeGoalReached, validateInstrument } from "../src/instrument";
+import { instrumentDefinition, prototypeGoalReached, prototypeTestConfig, validateInstrument } from "../src/instrument";
 import { MAX_PROTOTYPE_INTERACTIONS_PER_QUESTION, MAX_SUBMISSION_INTERACTIONS, recordSubmissionInteraction, validateSubmission } from "../src/submission";
 
 const definition = instrumentDefinition.parse({
@@ -13,6 +13,22 @@ describe("prototype telemetry invariants", () => {
   it("keeps success after participant leaves goal frame", () => {
     const reached = prototypeGoalReached(false, "1:2", "1:2");
     expect(prototypeGoalReached(reached, "1:3", "1:2")).toBe(true);
+  });
+
+  it("allows incomplete prototype drafts but keeps publication validation strict", () => {
+    const draft = instrumentDefinition.parse({
+      languages: ["da"], defaultLanguage: "da", messages: {}, blocks: [{ id: "b", questions: [{
+        code: "draft_prototype", type: "prototype_test", label: { da: "Prototype" },
+        prototype: { provider: "figma", flowType: "task", fileKey: "", startFrameId: "" },
+      }] }],
+    });
+    expect(validateInstrument(draft)).toEqual(expect.arrayContaining([
+      expect.stringContaining("missing a Figma prototype link"),
+      expect.stringContaining("missing a starting frame"),
+      expect.stringContaining("missing a goal frame"),
+    ]));
+    draft.blocks[0].questions[0].prototype = prototypeTestConfig.parse({ provider: "figma", flowType: "task", fileKey: "file", startFrameId: "1:1", goalFrameId: "1:1" });
+    expect(validateInstrument(draft).join(" ")).toContain("different starting and goal frames");
   });
 
   it("uses explicit aligned interaction limits", () => {

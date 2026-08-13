@@ -144,7 +144,7 @@ function makeQuestion(type: Question["type"], existing: Question[]): Question {
         flowType: "task" as const,
         fileKey: "",
         startFrameId: "",
-        goalFrameId: "",
+        goalFrameId: undefined,
         scaling: "scale-down" as const,
         instructionPosition: "bottom-right" as const,
         showSuccessScreen: true,
@@ -988,7 +988,7 @@ function PrototypeQuestionBody({
     flowType: "task" as const,
     fileKey: "",
     startFrameId: "",
-    goalFrameId: "",
+    goalFrameId: undefined,
     scaling: "scale-down" as const,
     instructionPosition: "bottom-right" as const,
     showSuccessScreen: true,
@@ -1000,7 +1000,7 @@ function PrototypeQuestionBody({
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-4 text-sm text-cyan-950">
-        Official Figma Embed API only. Event capture needs OAuth client ID and this Preview origin registered in Figma.
+        Indsæt prototype-link. Gem kladden. Forbind Figma. Vælg derefter start- og målskærm direkte i den levende prototype.
       </div>
       <LocalizedField
         label="Task instruction"
@@ -1011,28 +1011,16 @@ function PrototypeQuestionBody({
         textarea
       />
       <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block text-xs font-semibold text-slate-800">
-          Flow type
-          <Select className="mt-1 w-full" value={config.flowType} onChange={(event) => patchConfig({ flowType: event.target.value as "task" | "free" })}>
-            <option value="task">Task flow</option>
-            <option value="free">Free flow</option>
-          </Select>
-        </label>
-        <label className="block text-xs font-semibold text-slate-800">
-          Figma file key
-          <Input className="mt-1" value={config.fileKey} maxLength={200} onChange={(event) => patchConfig({ fileKey: event.target.value.trim() })} placeholder="From /proto/FILE_KEY/…" />
-        </label>
-        <label className="block text-xs font-semibold text-slate-800">
-          Starting frame ID
-          <Input className="mt-1" value={config.startFrameId} maxLength={200} onChange={(event) => patchConfig({ startFrameId: event.target.value.trim() })} placeholder="5019:210" />
-        </label>
-        {config.flowType === "task" && (
-          <label className="block text-xs font-semibold text-slate-800">
-            Goal frame ID
-            <Input className="mt-1" value={config.goalFrameId ?? ""} maxLength={200} onChange={(event) => patchConfig({ goalFrameId: event.target.value.trim() })} placeholder="5019:72" />
-          </label>
-        )}
+        <button type="button" onClick={() => patchConfig({ flowType: "task", showSuccessScreen: true })} className={`rounded-xl border p-4 text-left ${config.flowType === "task" ? "border-cyan-600 bg-cyan-50" : "border-line bg-white"}`}>
+          <span className="text-sm font-semibold text-slate-950">Task flow</span>
+          <span className="mt-1 block text-xs text-slate-600">Deltageren skal nå en valgt målskærm.</span>
+        </button>
+        <button type="button" onClick={() => patchConfig({ flowType: "free", goalFrameId: undefined, goalFrameName: undefined, showSuccessScreen: false })} className={`rounded-xl border p-4 text-left ${config.flowType === "free" ? "border-cyan-600 bg-cyan-50" : "border-line bg-white"}`}>
+          <span className="text-sm font-semibold text-slate-950">Free flow</span>
+          <span className="mt-1 block text-xs text-slate-600">Deltageren udforsker uden en målskærm.</span>
+        </button>
       </div>
+      <FigmaFramePicker studyId={studyId} questionCode={question.code} config={config} onPatch={patchConfig} />
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block text-xs font-semibold text-slate-800">
           Scaling
@@ -1047,21 +1035,15 @@ function PrototypeQuestionBody({
           </Select>
         </label>
       </div>
-      <div className="rounded-lg border border-line p-3 text-xs text-slate-600">
-        <p><strong>Figma sync:</strong> {config.lastSyncedAt ? new Date(config.lastSyncedAt).toLocaleString("da-DK") : "Ikke verificeret"}</p>
-        <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" variant="ghost" onClick={() => patchConfig({ fileKey: "", prototypeName: undefined, startFrameId: "", goalFrameId: undefined, goalFrameName: undefined, versionId: undefined, lastSyncedAt: undefined })}>Remove Figma link</Button></div>
-        <FigmaFramePicker studyId={studyId} questionCode={question.code} config={config} onPatch={patchConfig} />
-        <p className="mt-2">Connect virker kun med FIGMA_OAUTH_CLIENT_ID, server-only secret, registreret callback og file_content:read. Resync opdaterer kun efter verificeret REST-svar; live Embed-events kræver fortsat godkendt origin.</p>
-      </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="flex items-center gap-2 text-xs text-slate-700">
           <input type="checkbox" checked={config.consentRequired} onChange={(event) => patchConfig({ consentRequired: event.target.checked })} />
           Require telemetry consent before loading Figma
         </label>
-        <label className="flex items-center gap-2 text-xs text-slate-700">
+        {config.flowType === "task" && <label className="flex items-center gap-2 text-xs text-slate-700">
           <input type="checkbox" checked={config.showSuccessScreen} onChange={(event) => patchConfig({ showSuccessScreen: event.target.checked })} />
           Show goal reached message
-        </label>
+        </label>}
         <label className="flex items-center gap-2 text-xs text-slate-700">
           <input type="checkbox" checked={config.passwordRequired} onChange={(event) => patchConfig({ passwordRequired: event.target.checked })} />
           Prototype is password-protected (password stays in Figma; never stored here)
