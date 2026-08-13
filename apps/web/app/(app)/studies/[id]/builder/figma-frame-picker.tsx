@@ -77,7 +77,8 @@ export function FigmaFramePicker({ studyId, questionCode, config, onPatch }: {
     const params = new URLSearchParams({ fileKey: config.fileKey, studyId, questionCode });
     const response = await fetch(`/api/figma/frames?${params}`, { cache: "no-store" });
     if (!response.ok) {
-      setStatus("Figma-forbindelse eller filadgang mangler. Gem kladden før OAuth og kontroller deling i Figma.");
+      const body = await response.json().catch(() => null) as { error?: unknown } | null;
+      setStatus(figmaSyncErrorMessage(typeof body?.error === "string" ? body.error : "", response.status));
       return;
     }
     const result = await response.json() as { name: string; versionId: string; frames: Frame[]; flowStartingPoints: Frame[] };
@@ -208,6 +209,17 @@ export function FigmaFramePicker({ studyId, questionCode, config, onPatch }: {
   </div>;
 }
 
+function figmaSyncErrorMessage(code: string, status: number): string {
+  if (code === "figma_scope_missing") return "Figma OAuth-appen mangler scope file_content:read. Vælg scopet under OAuth scopes i Figma, gem/publicér app-konfigurationen, og vælg derefter Reconnect Figma OAuth.";
+  if (code === "figma_file_permission_denied") return "Figma-kontoen, som godkendte OAuth, mangler filadgang i Figma. Del filen med kontoen direkte eller via projekt/team; linkvisning alene giver ikke REST API-adgang. Reconnect derefter.";
+  if (code === "figma_token_rejected" || code === "figma_not_connected") return "Figma-token er udløbet eller afvist. Vælg Reconnect Figma OAuth og godkend igen.";
+  if (code === "figma_file_mismatch") return "Figma-linket matcher ikke den gemte kladde. Gem kladden, genindlæs builderen og prøv igen.";
+  if (code === "figma_file_not_found") return "Figma-filen blev ikke fundet. Importér det fulde prototype-link igen og kontrollér, at linket peger på en Figma Design-prototype.";
+  if (code === "figma_rate_limited") return "Figma begrænser API-kald midlertidigt. Vent ét minut og prøv Resync igen.";
+  if (code === "forbidden") return "Din platformrolle har ikke adgang til at redigere dette studie.";
+  if (code === "figma_rest_forbidden" || status === 403) return "Figma REST API afviser kaldet (403). Kontrollér, at OAuth-appen har file_content:read, og at OAuth-kontoen har filen via direkte deling eller projekt/team. Reconnect derefter.";
+  return `Figma-sync fejlede (HTTP ${status}). Prøv Reconnect Figma OAuth. Hvis fejlen fortsætter, kontrollér OAuth-scope og kontoens filadgang.`;
+}
 function FrameCard({ label, frame, thumbnail, onChange, disabled }: { label: string; frame: Frame | null; thumbnail?: string; onChange: () => void; disabled: boolean }) {
   return <div className="flex min-h-28 items-center gap-3 rounded-xl border border-line bg-white p-3">
     <div className="grid h-20 w-24 shrink-0 place-items-center overflow-hidden rounded-lg border border-line bg-slate-100 bg-cover bg-center text-center text-[10px] text-slate-500" style={thumbnail ? { backgroundImage: `url("${thumbnail.replaceAll('"', '%22')}")` } : undefined} role="img" aria-label={frame ? `Preview af ${frame.name}` : "Ingen frame valgt"}>{!thumbnail && (frame ? "Preview hentes efter Figma sync" : "Vælg frame")}</div>

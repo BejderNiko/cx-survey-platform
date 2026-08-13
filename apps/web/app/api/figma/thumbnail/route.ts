@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/auth";
 import { assertFigmaDraftAccess, figmaDraftAccessResponse } from "@/lib/figma-access";
 import { FIGMA_ACCESS_COOKIE, FIGMA_ACCESS_COOKIE_PATH, openFigmaToken } from "@/lib/figma-token";
+import { classifyFigmaApiError } from "@/lib/figma-api-error";
 
 const FILE_KEY = /^[a-zA-Z0-9_-]{1,200}$/;
 const FRAME_ID = /^\d+:\d+$/;
@@ -33,7 +34,12 @@ export async function GET(request: Request) {
   endpoint.searchParams.set("format", "png");
   endpoint.searchParams.set("scale", "0.5");
   const response = await fetch(endpoint, { headers: { authorization: `Bearer ${token}` }, cache: "no-store" });
-  if (!response.ok) return Response.json({ error: "figma_thumbnail_unavailable" }, { status: response.status === 403 ? 403 : 502 });
+  if (!response.ok) {
+    const providerBody = await response.json().catch(() => null) as unknown;
+    const error = classifyFigmaApiError(response.status, providerBody);
+    const status = response.status === 403 || response.status === 404 || response.status === 429 ? response.status : 502;
+    return Response.json({ error }, { status });
+  }
   const body = await response.json() as { err?: string | null; images?: Record<string, string | null> };
   const imageUrl = body.images?.[frameId];
   if (!imageUrl) return Response.json({ error: "figma_thumbnail_missing" }, { status: 404 });

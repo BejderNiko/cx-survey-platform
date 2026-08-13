@@ -14,6 +14,12 @@ describe("new integration route security", () => {
     expect(read("app/api/figma/callback/route.ts")).toContain("sealFigmaToken");
     expect(read("app/api/figma/callback/route.ts")).not.toContain('jar.set("figma_access", token.access_token');
     expect(read("app/api/figma/frames/route.ts")).toContain("openFigmaToken");
+    const framesRoute = read("app/api/figma/frames/route.ts");
+    expect(framesRoute).toContain("classifyFigmaApiError");
+    expect(framesRoute).not.toContain("Response.json({ error, providerBody");
+    const thumbnailRoute = read("app/api/figma/thumbnail/route.ts");
+    expect(thumbnailRoute).toContain("classifyFigmaApiError");
+    expect(thumbnailRoute).not.toContain("Response.json({ error, providerBody");
     expect(read("app/api/figma/status/route.ts")).toContain("openFigmaToken");
     expect(read("app/api/figma/disconnect/route.ts")).toContain("maxAge: 0");
     expect(read("lib/auth.ts")).toContain("FIGMA_ACCESS_COOKIE_PATH");

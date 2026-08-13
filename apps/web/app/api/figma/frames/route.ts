@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/auth";
 import { assertFigmaDraftAccess, figmaDraftAccessResponse } from "@/lib/figma-access";
 import { FIGMA_ACCESS_COOKIE, FIGMA_ACCESS_COOKIE_PATH, openFigmaToken } from "@/lib/figma-token";
+import { classifyFigmaApiError } from "@/lib/figma-api-error";
 
 export async function GET(request: Request) {
   const session = await getSession(); if (!session) return Response.json({ error: "unauthorized" }, { status: 401 });
@@ -19,7 +20,12 @@ export async function GET(request: Request) {
     return Response.json({ error: "figma_not_connected" }, { status: 401 });
   }
   const response = await fetch(`https://api.figma.com/v1/files/${encodeURIComponent(fileKey)}?depth=2`, { headers: { authorization: `Bearer ${token}` }, cache: "no-store" });
-  if (!response.ok) return Response.json({ error: "figma_file_unavailable" }, { status: response.status === 403 ? 403 : 502 });
+  if (!response.ok) {
+    const providerBody = await response.json().catch(() => null) as unknown;
+    const error = classifyFigmaApiError(response.status, providerBody);
+    const status = response.status === 403 || response.status === 404 || response.status === 429 ? response.status : 502;
+    return Response.json({ error }, { status });
+  }
   const body = await response.json() as { name?: string; version?: string; document?: { children?: Array<{ children?: Array<{ id?: string; name?: string; type?: string }>; flowStartingPoints?: Array<{ nodeId?: string; name?: string }>; prototypeStartNodeID?: string }> } };
   const frames = (body.document?.children ?? []).flatMap((page) => page.children ?? []).filter((node) => node.type === "FRAME" && node.id && node.name).slice(0, 500).map((node) => ({ id: node.id!, name: node.name! }));
   const flowStartingPoints = (body.document?.children ?? []).flatMap((page) =>

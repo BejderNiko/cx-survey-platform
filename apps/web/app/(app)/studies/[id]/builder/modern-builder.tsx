@@ -279,7 +279,7 @@ export function Builder({
 
   return (
     <div className="-m-4 min-h-[calc(100vh-3.5rem)] bg-background md:-m-6">
-      <header className="sticky top-0 z-30 flex min-h-16 flex-wrap items-center gap-3 border-b border-[#dfe3e6] bg-transparent px-4 py-3 md:px-6">
+      <header className="sticky top-0 z-30 flex min-h-16 flex-wrap items-center gap-3 bg-transparent px-4 py-3 md:px-6">
         <Link href={`/studies/${studyId}`} className="inline-flex h-9 items-center gap-2 rounded-lg px-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-950">
           <Icon name="arrow-left" />
           Study
