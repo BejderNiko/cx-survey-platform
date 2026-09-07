@@ -143,7 +143,7 @@ export const question = z.object({
   imageUrl: z.string().optional(),               // first_click stimulus (data URI or path)
   taskText: localizedText.optional(),            // first_click task instruction
   stimulus: stimulusAsset.optional(),             // secure first-click asset (legacy imageUrl stays readable)
-  stimuli: z.array(stimulusAsset).min(1).max(8).optional(), // image-based question assets
+  stimuli: z.array(stimulusAsset).min(2, "Preference test and image-based questions require at least 2 stimuli").max(8, "Image-based questions allow maximum 8 stimuli").optional(), // image-based question assets
   randomizeStimuli: z.boolean().optional(),
   contextOverride: stimulusAsset.nullable().optional(), // reserved question-level override; null hides study context
   prototype: prototypeTestConfig.optional(),
