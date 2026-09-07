@@ -5,12 +5,14 @@ import {
   allQuestions,
   lt,
   nextStep,
+  recordSubmissionInteraction,
   type InstrumentDefinition,
   type Locale,
   type Question,
   type StimulusAsset,
 } from "@ok/domain";
 import { Button, Input, Textarea, cn } from "@/components/ui";
+import { FigmaPrototype } from "./figma-prototype";
 
 /**
  * Respondent runtime: renders a published instrument one question at a time,
@@ -57,8 +59,16 @@ export function SurveyRenderer({
   const [validationMsg, setValidationMsg] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const interactionsRef = useRef<InteractionPayload[]>([]);
+  const recordInteraction = useCallback((interaction: InteractionPayload): boolean => {
+    const result = recordSubmissionInteraction(definition, interactionsRef.current, interaction);
+    interactionsRef.current = result.interactions;
+    if (!result.ok) {
+      setValidationMsg(locale === "da" ? `Telemetri kunne ikke registreres: ${result.error}` : `Telemetry could not be recorded: ${result.error}`);
+    }
+    return result.ok;
+  }, [definition, locale]);
 
-  const questions = useMemo(() => allQuestions(definition), [definition]);
+  const questions = useMemo(() => allQuestions(definition).filter((question) => !question.hidden), [definition]);
   const total = questions.length;
 
   const goNext = useCallback(
@@ -158,7 +168,7 @@ export function SurveyRenderer({
   const msg = (key: "intro" | "thankYou" | "disqualified") => lt(definition.messages?.[key], locale);
 
   return (
-    <div className={cn("mx-auto w-full", currentContext ? "max-w-6xl" : "max-w-xl")}>
+    <div className={cn("mx-auto w-full", currentContext || current?.type === "prototype_test" ? "max-w-6xl" : "max-w-xl")}>
       <div className="mb-3 flex items-center justify-between gap-2">
         <span className="text-xs text-muted">{studyTitle ?? ""}</span>
         {definition.languages.length > 1 && (
@@ -220,7 +230,7 @@ export function SurveyRenderer({
                   locale={locale}
                   value={answerValue}
                   onChange={setAnswer}
-                  interactions={interactionsRef}
+                  recordInteraction={recordInteraction}
                   assetToken={assetToken}
                 />
               </div>
@@ -333,13 +343,13 @@ function OptionList({
 }
 
 function QuestionInput({
-  question, locale, value, onChange, interactions: interactionsRef, assetToken,
+  question, locale, value, onChange, recordInteraction, assetToken,
 }: {
   question: Question;
   locale: Locale;
   value: unknown;
   onChange: (v: unknown) => void;
-  interactions: React.RefObject<InteractionPayload[]>;
+  recordInteraction: (interaction: InteractionPayload) => boolean;
   assetToken?: string;
 }) {
   switch (question.type) {
@@ -505,6 +515,19 @@ function QuestionInput({
         </div>
       );
     }
+    case "prototype_test":
+      return question.prototype ? (
+        <div>
+          <FigmaPrototype
+            code={question.code}
+            config={question.prototype}
+            value={value}
+            onChange={onChange}
+            recordInteraction={recordInteraction}
+            instruction={lt(question.taskText, locale)}
+          />
+        </div>
+      ) : <p role="alert" className="text-sm text-danger">Prototype configuration is missing.</p>;
     case "preference_test":
       return (
         <PreferenceInput
@@ -517,34 +540,44 @@ function QuestionInput({
 
       );
     case "first_click": {
-      const v = value as { x: number; y: number } | undefined;
-      const imageUrl = question.stimulus ? stimulusUrl(question.stimulus, assetToken) : question.imageUrl ?? "";
+      const response = value as { x: number; y: number; selectedAssetId?: string } | undefined;
+      const stimuli = question.stimuli ?? (question.stimulus ? [question.stimulus] : []);
+      const recordClick = (assetId: string, pt: { x: number; y: number }, meta: Record<string, unknown>) => {
+        const accepted = recordInteraction({ code: question.code, eventType: "first_click", payload: { ...pt, ...meta, assetId } });
+        if (accepted) onChange({ ...pt, selectedAssetId: assetId });
+      };
       return (
         <div>
           {question.taskText && (
             <p className="mb-2 rounded-md bg-accent-soft px-3 py-2 text-sm">{lt(question.taskText, locale)}</p>
           )}
-          <FirstClickImage
-            imageUrl={imageUrl}
-            altText={question.stimulus?.altText ?? "Teststimulus"}
-            value={v}
-            onClickPoint={(pt, meta) => {
-              onChange(pt);
-              const entry = {
-                code: question.code,
-                eventType: "first_click",
-                payload: { ...pt, ...meta },
-              };
-              interactionsRef.current = [
-                ...interactionsRef.current.filter((e) => e.code !== question.code),
-                entry,
-              ];
-            }}
-          />
+          {stimuli.length > 0 ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {stimuli.map((stimulus, index) => (
+                <FirstClickImage
+                  key={stimulus.id}
+                  imageUrl={stimulusUrl(stimulus, assetToken)}
+                  altText={stimulus.altText}
+                  value={stimuli.length === 1 || response?.selectedAssetId === stimulus.assetId ? response : undefined}
+                  onClickPoint={(pt, meta) => recordClick(stimulus.assetId, pt, { ...meta, stimulusIndex: index })}
+                />
+              ))}
+            </div>
+          ) : (
+            <FirstClickImage
+              imageUrl={question.imageUrl ?? ""}
+              altText="Teststimulus"
+              value={response}
+              onClickPoint={(pt, meta) => {
+                const accepted = recordInteraction({ code: question.code, eventType: "first_click", payload: { ...pt, ...meta } });
+                if (accepted) onChange(pt);
+              }}
+            />
+          )}
           <p className="mt-1 text-xs text-muted">
-            {v
-              ? locale === "da" ? "Klik registreret — du kan klikke igen for at ændre." : "Click recorded — click again to change."
-              : locale === "da" ? "Klik på billedet." : "Click on the image."}
+            {response
+              ? locale === "da" ? "Klik registreret \u2014 du kan klikke igen for at \u00e6ndre." : "Click recorded \u2014 click again to change."
+              : locale === "da" ? "Klik p\u00e5 et billede." : "Click on an image."}
           </p>
         </div>
       );

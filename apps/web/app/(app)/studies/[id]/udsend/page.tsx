@@ -7,6 +7,7 @@ import { withUser } from "@/lib/db";
 import { env } from "@/lib/env";
 import { fmtDateTime } from "@/lib/format";
 import { DISTRIBUTION_KIND, INVITATION_STATUS, OUTBOX_STATUS, label } from "@/lib/labels";
+import { getPanelFilterUiData } from "@/lib/data/panel-filter-ui";
 import { CreateDistributionForms } from "./distribution-forms";
 import { OutboxMessageView } from "./outbox-message";
 
@@ -18,7 +19,7 @@ export default async function StudyDistributionPage({ params }: { params: Promis
   const data = await withUser(session.userId, session.orgId, async (tx) => {
     const [study] = await tx`select id, status from studies where id = ${id} and org_id = ${session.orgId}`;
     if (!study) return null;
-    const [distributions, funnel, outbox, segments] = await Promise.all([
+    const [distributions, funnel, outbox, segments, panelFilterUi] = await Promise.all([
       tx`select d.id, d.kind, d.name, d.status, d.public_token, d.audience_snapshot, d.created_at,
                 (select count(*) from invitations i where i.distribution_id = d.id and i.org_id = ${session.orgId}) as invitations,
                 (select count(*) from responses r where r.distribution_id = d.id and r.org_id = ${session.orgId} and r.status = 'completed') as completed
@@ -31,8 +32,9 @@ export default async function StudyDistributionPage({ params }: { params: Promis
          where d.study_id = ${id} and o.org_id = ${session.orgId}
          order by o.created_at desc limit 50`,
       tx`select id, name from segments where org_id = ${session.orgId} order by name`,
+      getPanelFilterUiData(tx, session.orgId),
     ]);
-    return { study, distributions, funnel, outbox, segments };
+    return { study, distributions, funnel, outbox, segments, panelFilterUi };
   });
   if (!data) notFound();
 
@@ -118,6 +120,9 @@ export default async function StudyDistributionPage({ params }: { params: Promis
             <CreateDistributionForms
               studyId={id}
               segments={data.segments.map((s) => ({ id: s.id as string, name: s.name as string }))}
+              filterFields={data.panelFilterUi.fields}
+              messages={data.panelFilterUi.messages}
+              panelTotal={data.panelFilterUi.total}
             />
           </div>
         )}

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { instrumentDefinition, validateInstrument, type InstrumentDefinition } from "../src/instrument";
-import { nextStep, visiblePath } from "../src/logic";
+import {
+  INCOMPLETE_LOGIC_CONDITION_MESSAGE,
+  instrumentDefinition,
+  validateInstrument,
+  type InstrumentDefinition,
+} from "../src/instrument";
+import { evaluateCondition, nextStep, visiblePath } from "../src/logic";
 
 const def: InstrumentDefinition = instrumentDefinition.parse({
   languages: ["da", "en"],
@@ -51,6 +56,13 @@ describe("survey logic engine", () => {
     expect(validateInstrument(def)).toEqual([]);
   });
 
+  it("parses legacy imageUrl for immutable playback but rejects it for new save or publication", () => {
+    const legacy = structuredClone(def);
+    legacy.blocks[0].questions.push({ code: "legacy_click", type: "first_click", label: { en: "Legacy" }, imageUrl: "/legacy.png", required: false });
+    const parsed = instrumentDefinition.parse(legacy);
+    expect(parsed.blocks[0].questions.at(-1)?.imageUrl).toBe("/legacy.png");
+    expect(validateInstrument(parsed)).toContain("Question 'legacy_click' uses legacy imageUrl. Upload a protected media asset before saving or publishing a new draft.");
+  });
   it("starts at the first question", () => {
     const step = nextStep(def, null, {});
     expect(step.kind).toBe("question");
@@ -90,6 +102,24 @@ describe("survey logic engine", () => {
     ]);
   });
 
+  it("skips questions hidden from participants", () => {
+    const hidden = structuredClone(def);
+    hidden.blocks[0].questions[3].hidden = true;
+    expect(visiblePath(hidden, { screener: "yes", nps_score: 10 })).toEqual([
+      "screener",
+      "nps_score",
+      "email_optin",
+    ]);
+  });
+
+  it("skips a hidden first question", () => {
+    const hidden = structuredClone(def);
+    hidden.blocks[0].questions[0].hidden = true;
+    const step = nextStep(hidden, null, {});
+    expect(step.kind).toBe("question");
+    if (step.kind === "question") expect(step.question.code).toBe("nps_score");
+  });
+
   it("flags backward branches and unknown targets", () => {
     const bad = structuredClone(def);
     bad.blocks[0].questions[3].branches = [
@@ -97,5 +127,91 @@ describe("survey logic engine", () => {
     ];
     const problems = validateInstrument(bad);
     expect(problems.some((p) => p.includes("jump forward"))).toBe(true);
+  });
+
+  it("rejects logic that depends on or targets hidden questions", () => {
+    const bad = structuredClone(def);
+    bad.blocks[0].questions[1].hidden = true;
+    bad.blocks[0].questions[2].visibleIf = [{ questionCode: "nps_score", op: "answered" }];
+    bad.blocks[0].questions[0].branches = [
+      { id: "hidden-target", when: [{ questionCode: "screener", op: "answered" }], goTo: "nps_score" },
+    ];
+    const problems = validateInstrument(bad);
+    expect(problems).toEqual(expect.arrayContaining([
+      "Hidden question 'nps_score' cannot have routing rules.",
+      "Display condition on 'detractor_why' cannot reference hidden question 'nps_score'.",
+    ]));
+  });
+
+  it("rejects logic configured on a hidden question", () => {
+    const bad = structuredClone(def);
+    bad.blocks[0].questions[2].hidden = true;
+    const problems = validateInstrument(bad);
+    expect(problems).toContain("Hidden question 'detractor_why' cannot have display conditions.");
+  });
+
+  it("treats legacy display conditions as show rules and lets matching hide rules win", () => {
+    const conditional = structuredClone(def);
+    conditional.blocks[0].questions[3].visibleIf = [
+      { questionCode: "nps_score", op: "eq", value: 2, effect: "hide" },
+    ];
+    expect(visiblePath(conditional, { screener: "yes", nps_score: 2 })).not.toContain("promoter_why");
+    expect(visiblePath(conditional, { screener: "yes", nps_score: 8 })).toContain("promoter_why");
+    expect(visiblePath(def, { screener: "yes", nps_score: 2 })).toContain("detractor_why");
+  });
+
+  it("supports any-match display conditions without changing the legacy all-match default", () => {
+    const conditional = structuredClone(def);
+    conditional.blocks[0].questions[3].visibleIf = [
+      { questionCode: "screener", op: "eq", value: "no" },
+      { questionCode: "nps_score", op: "gte", value: 9 },
+    ];
+    expect(visiblePath(conditional, { screener: "yes", nps_score: 10 })).not.toContain("promoter_why");
+
+    conditional.blocks[0].questions[3].visibleIfMode = "any";
+    expect(visiblePath(conditional, { screener: "yes", nps_score: 10 })).toContain("promoter_why");
+  });
+
+  it("matches every selected value in a multiple-choice contains condition", () => {
+    expect(evaluateCondition(
+      { questionCode: "channels", op: "contains", value: ["email", "sms"] },
+      { channels: ["email", "sms", "phone"] },
+    )).toBe(true);
+    expect(evaluateCondition(
+      { questionCode: "channels", op: "contains", value: ["email", "push"] },
+      { channels: ["email", "sms"] },
+    )).toBe(false);
+  });
+
+  it("applies display conditions and hidden state to whole sections", () => {
+    const conditional = structuredClone(def);
+    conditional.blocks.push({
+      id: "b2",
+      visibleIf: [{ questionCode: "nps_score", op: "eq", value: 10 }],
+      questions: [{ code: "section_followup", type: "long_text", label: { en: "Section follow-up" }, required: false }],
+    });
+    expect(visiblePath(conditional, { screener: "yes", nps_score: 10 })).toContain("section_followup");
+    expect(visiblePath(conditional, { screener: "yes", nps_score: 2 })).not.toContain("section_followup");
+
+    conditional.blocks[1].hidden = true;
+    expect(visiblePath(conditional, { screener: "yes", nps_score: 10 })).not.toContain("section_followup");
+  });
+
+  it("flags incomplete display conditions before save or publish", () => {
+    const bad = structuredClone(def);
+    bad.blocks[0].questions[2].visibleIf = [
+      { questionCode: "", op: "eq", value: "", effect: "show" },
+    ];
+    expect(validateInstrument(bad)).toContain(INCOMPLETE_LOGIC_CONDITION_MESSAGE);
+  });
+
+  it("requires section display conditions to reference an earlier section", () => {
+    const bad = structuredClone(def);
+    bad.blocks.push({
+      id: "b2",
+      visibleIf: [{ questionCode: "section_followup", op: "answered" }],
+      questions: [{ code: "section_followup", type: "long_text", label: { en: "Section follow-up" }, required: false }],
+    });
+    expect(validateInstrument(bad)).toContain("Display condition on 'b2' must reference an earlier question.");
   });
 });

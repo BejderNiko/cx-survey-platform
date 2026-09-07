@@ -40,7 +40,7 @@ export async function uploadStimulus(studyId: string, formData: FormData): Promi
   const extension = ALLOWED_TYPES.get(file.type);
   if (!extension) return { ok: false, error: "Brug PNG, JPEG eller WebP." };
   if (file.size > MAX_STIMULUS_BYTES) return { ok: false, error: "Billedet må højst fylde 8 MB." };
-  if (!["context", "preference", "first_click"].includes(kind)) return { ok: false, error: "Ukendt stimulustype." };
+  if (!["context", "preference", "first_click", "prototype_frame"].includes(kind)) return { ok: false, error: "Ukendt stimulustype." };
 
   const assetId = randomUUID();
   let storedKey: string | null = null;

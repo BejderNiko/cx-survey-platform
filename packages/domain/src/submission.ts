@@ -1,4 +1,6 @@
 import { allQuestions, type InstrumentDefinition, type Question } from "./instrument";
+import { MAX_FIRST_CLICK_INTERACTIONS_PER_QUESTION, MAX_PROTOTYPE_INTERACTIONS_PER_QUESTION, MAX_SUBMISSION_INTERACTIONS } from "./interaction-budget";
+export { MAX_FIRST_CLICK_INTERACTIONS_PER_QUESTION, MAX_PROTOTYPE_INTERACTIONS_PER_QUESTION, MAX_SUBMISSION_INTERACTIONS } from "./interaction-budget";
 import { nextStep, type AnswerMap } from "./logic";
 
 export interface SubmittedAnswer {
@@ -29,6 +31,34 @@ export interface ValidatedSubmission {
 export type SubmissionValidation =
   | { ok: true; value: ValidatedSubmission }
   | { ok: false; errors: string[] };
+
+export type InteractionRecordResult =
+  | { ok: true; interactions: SubmittedInteraction[] }
+  | { ok: false; interactions: SubmittedInteraction[]; error: string };
+
+/** Shared client budget policy. Server validation uses the same constants. */
+export function recordSubmissionInteraction(
+  def: InstrumentDefinition,
+  current: SubmittedInteraction[],
+  interaction: SubmittedInteraction,
+): InteractionRecordResult {
+  const question = allQuestions(def).find((item) => item.code === interaction.code);
+  if (!question || !["prototype_test", "first_click"].includes(question.type)) {
+    return { ok: false, interactions: current, error: "Interaction is not supported for this question." };
+  }
+  if (question.type === "first_click") {
+    const retained = current.filter((entry) => entry.code !== interaction.code);
+    if (interaction.eventType !== "first_click" || retained.length + 1 > MAX_SUBMISSION_INTERACTIONS) {
+      return { ok: false, interactions: current, error: "First-click telemetry budget is exhausted." };
+    }
+    return { ok: true, interactions: [...retained, interaction] };
+  }
+  const ownCount = current.filter((entry) => entry.code === interaction.code).length;
+  if (ownCount >= MAX_PROTOTYPE_INTERACTIONS_PER_QUESTION || current.length >= MAX_SUBMISSION_INTERACTIONS) {
+    return { ok: false, interactions: current, error: "Prototype telemetry budget is exhausted." };
+  }
+  return { ok: true, interactions: [...current, interaction] };
+}
 
 /**
  * Validate an untrusted respondent payload against its immutable instrument.
@@ -105,12 +135,32 @@ export function validateSubmission(
     errors.push(`Submitted status '${input.status}' does not match survey path '${finalStatus}'.`);
   }
 
+  if (input.interactions.length > MAX_SUBMISSION_INTERACTIONS) {
+    errors.push(`Submission has more than ${MAX_SUBMISSION_INTERACTIONS} interaction events.`);
+  }
+  const prototypeInteractionCounts = new Map<string, number>();
   const interactions: SubmittedInteraction[] = [];
   const interactionCodes = new Set<string>();
   for (const interaction of input.interactions) {
     const question = questions.get(interaction.code);
-    if (!question || question.type !== "first_click" || !pathCodes.has(interaction.code)) {
+    if (!question || !pathCodes.has(interaction.code)) {
       errors.push(`Interaction for '${interaction.code}' is not allowed on this survey path.`);
+      continue;
+    }
+    if (question.type === "prototype_test") {
+      const count = (prototypeInteractionCounts.get(interaction.code) ?? 0) + 1;
+      prototypeInteractionCounts.set(interaction.code, count);
+      if (count > MAX_PROTOTYPE_INTERACTIONS_PER_QUESTION) {
+        errors.push(`Interaction for '${interaction.code}' exceeds per-prototype limit.`);
+        continue;
+      }
+      const problem = validatePrototypeInteraction(interaction);
+      if (problem) errors.push(`Interaction for '${interaction.code}': ${problem}`);
+      else interactions.push(interaction);
+      continue;
+    }
+    if (question.type !== "first_click") {
+      errors.push(`Interaction for '${interaction.code}' is not supported for '${question.type}'.`);
       continue;
     }
     if (interaction.eventType !== "first_click") {
@@ -121,7 +171,7 @@ export function validateSubmission(
       errors.push(`Interaction for '${interaction.code}' was submitted more than once.`);
       continue;
     }
-    const payloadProblem = validateFirstClickPayload(interaction.payload, answerMap[interaction.code]);
+    const payloadProblem = validateFirstClickPayload(interaction.payload, answerMap[interaction.code], question);
     if (payloadProblem) {
       errors.push(`Interaction for '${interaction.code}': ${payloadProblem}`);
       continue;
@@ -133,6 +183,18 @@ export function validateSubmission(
   for (const answer of answers) {
     if (answer.type === "first_click" && !interactionCodes.has(answer.code)) {
       errors.push(`First-click answer '${answer.code}' is missing its interaction metadata.`);
+    }
+    if (answer.type === "prototype_test") {
+      const currentQuestion = questions.get(answer.code);
+      const currentAnswer = answer.value as Record<string, unknown>;
+      const frames = interactions.filter((entry) => entry.code === answer.code && entry.eventType === "prototype_frame");
+      if (frames.length === 0) errors.push(`Prototype answer '${answer.code}' is missing frame telemetry.`);
+      if (currentAnswer.reachedGoal === true) {
+        const goal = currentQuestion?.prototype?.goalFrameId;
+        if (!goal || !frames.some((entry) => entry.payload.frameId === goal)) {
+          errors.push(`Prototype answer '${answer.code}' claims success without a matching goal-frame event.`);
+        }
+      }
     }
   }
 
@@ -200,10 +262,17 @@ function validateAnswerValue(question: Question, value: unknown): string | null 
         ? null
         : "contains an unknown column value.";
     }
-    case "first_click":
-      return isPlainObject(value) && nonNegativeNumber(value.x) && nonNegativeNumber(value.y)
-        ? null
-        : "must contain non-negative x/y coordinates.";
+    case "first_click": {
+      if (!isPlainObject(value) || !nonNegativeNumber(value.x) || !nonNegativeNumber(value.y)) {
+        return "must contain non-negative x/y coordinates.";
+      }
+      const stimuli = firstClickStimuli(question);
+      if (stimuli.length > 0 && (typeof value.selectedAssetId !== "string"
+          || !stimuli.some((stimulus) => stimulus.assetId === value.selectedAssetId))) {
+        return "selected asset must match a published stimulus.";
+      }
+      return null;
+    }
     case "preference_test": {
       if (!isPlainObject(value)) return "must identify one selected stimulus and its display order.";
       const stimulusIds = (question.stimuli ?? []).map((stimulus) => stimulus.id);
@@ -219,6 +288,14 @@ function validateAnswerValue(question: Question, value: unknown): string | null 
         return "display order must contain every stimulus exactly once.";
       }
       return order.every((id) => allowed.has(id)) ? null : "display order contains an unknown stimulus.";
+    }
+    case "prototype_test": {
+      if (!isPlainObject(value)) return "must contain prototype completion state.";
+      if (typeof value.reachedGoal !== "boolean") return "must include reachedGoal.";
+      if (value.lastFrameId !== null && (typeof value.lastFrameId !== "string" || value.lastFrameId.length > 200)) {
+        return "lastFrameId must be null or a bounded string.";
+      }
+      return null;
     }
   }
 }
@@ -257,11 +334,16 @@ function nonNegativeNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
+function firstClickStimuli(question: Question) {
+  return question.stimuli ?? (question.stimulus ? [question.stimulus] : []);
+}
+
 function validateFirstClickPayload(
   payload: Record<string, unknown>,
   answer: unknown,
+  question: Question,
 ): string | null {
-  const allowed = new Set(["x", "y", "naturalWidth", "naturalHeight", "elapsedMs"]);
+  const allowed = new Set(["x", "y", "naturalWidth", "naturalHeight", "elapsedMs", "assetId", "stimulusIndex"]);
   if (Object.keys(payload).some((key) => !allowed.has(key))) return "contains unsupported fields.";
   if (!nonNegativeNumber(payload.x) || !nonNegativeNumber(payload.y)) return "x/y must be non-negative numbers.";
   if (!nonNegativeNumber(payload.naturalWidth) || !nonNegativeNumber(payload.naturalHeight)
@@ -274,5 +356,56 @@ function validateFirstClickPayload(
   if (!isPlainObject(answer) || answer.x !== payload.x || answer.y !== payload.y) {
     return "coordinates must match the submitted first-click answer.";
   }
+  const stimuli = firstClickStimuli(question);
+  if (stimuli.length > 0) {
+    if (typeof payload.assetId !== "string" || !Number.isInteger(payload.stimulusIndex)) {
+      return "assetId and stimulusIndex are required for a published stimulus.";
+    }
+    const selected = stimuli[Number(payload.stimulusIndex)];
+    if (!selected || selected.assetId !== payload.assetId || answer.selectedAssetId !== selected.assetId) {
+      return "asset binding does not match the published stimulus.";
+    }
+  } else if (payload.assetId !== undefined || payload.stimulusIndex !== undefined || answer.selectedAssetId !== undefined) {
+    return "legacy first-click questions cannot submit asset binding fields.";
+  }
   return nonNegativeNumber(payload.elapsedMs) ? null : "elapsedMs must be a non-negative number.";
+}
+
+function boundedId(value: unknown): boolean {
+  return typeof value === "string" && value.length > 0 && value.length <= 200;
+}
+
+function validatePrototypeInteraction(interaction: SubmittedInteraction): string | null {
+  const payload = interaction.payload;
+  if (interaction.eventType === "prototype_frame") {
+    const allowed = new Set(["frameId", "previousFrameId", "elapsedMs", "initial"]);
+    if (Object.keys(payload).some((key) => !allowed.has(key))) return "frame event contains unsupported fields.";
+    if (!boundedId(payload.frameId)) return "frameId is invalid.";
+    if (payload.previousFrameId !== null && payload.previousFrameId !== undefined && !boundedId(payload.previousFrameId)) {
+      return "previousFrameId is invalid.";
+    }
+    if (!nonNegativeNumber(payload.elapsedMs)) return "elapsedMs must be non-negative.";
+    return payload.initial === undefined || typeof payload.initial === "boolean" ? null : "initial must be boolean.";
+  }
+  if (interaction.eventType === "prototype_click") {
+    const allowed = new Set(["frameId", "x", "y", "isMisclick", "targetNodeId", "scrollingFrameId", "elapsedMs"]);
+    if (Object.keys(payload).some((key) => !allowed.has(key))) return "click event contains unsupported fields.";
+    if (!boundedId(payload.frameId) || !nonNegativeNumber(payload.x) || !nonNegativeNumber(payload.y)) {
+      return "click frameId/x/y are invalid.";
+    }
+    if (typeof payload.isMisclick !== "boolean" || !nonNegativeNumber(payload.elapsedMs)) {
+      return "click status or elapsedMs is invalid.";
+    }
+    for (const key of ["targetNodeId", "scrollingFrameId"] as const) {
+      if (payload[key] !== null && payload[key] !== undefined && !boundedId(payload[key])) return `${key} is invalid.`;
+    }
+    return null;
+  }
+  if (interaction.eventType === "prototype_status") {
+    const allowed = new Set(["status", "elapsedMs"]);
+    if (Object.keys(payload).some((key) => !allowed.has(key))) return "status event contains unsupported fields.";
+    if (!["LOGIN_SCREEN_SHOWN", "PASSWORD_SCREEN_SHOWN"].includes(String(payload.status))) return "status is invalid.";
+    return nonNegativeNumber(payload.elapsedMs) ? null : "elapsedMs must be non-negative.";
+  }
+  return `event '${interaction.eventType}' is not supported.`;
 }

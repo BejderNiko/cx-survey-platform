@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import {
   METRIC_DEFINITIONS,
+  INCOMPLETE_LOGIC_CONDITION_MESSAGE,
   allQuestions,
   instrumentDefinition,
   validateInstrument,
@@ -11,12 +12,15 @@ import {
   type InstrumentDefinition,
 } from "@ok/domain";
 import { withAuthorized } from "@/lib/auth";
+import { env } from "@/lib/env";
+import { issueDraftPreviewToken } from "@/lib/preview-token";
 import { audit } from "@/lib/audit";
 import { deleteStimulusObjectWithRetry } from "@/lib/stimulus-storage";
 
 const BLANK_SURVEY: InstrumentDefinition = {
   languages: ["da"],
   defaultLanguage: "da",
+  participantDevice: "any",
   blocks: [{ id: "b1", questions: [] }],
   messages: {},
 };
@@ -39,6 +43,8 @@ export async function createStudy(input: {
       const [tpl] = await tx`select definition, category from templates where id = ${input.templateId}`;
       if (tpl) {
         definition = toDanishDraft(instrumentDefinition.parse(tpl.definition));
+        const legacyTemplateMediaProblem = validateInstrument(definition).find((problem) => problem.includes("uses legacy imageUrl"));
+        if (legacyTemplateMediaProblem) throw new Error(legacyTemplateMediaProblem);
         methodTags = [tpl.category as string];
       }
     }
@@ -57,18 +63,35 @@ export async function createStudy(input: {
   redirect(`/studies/${studyId}/builder`);
 }
 
-export async function updateDraft(studyId: string, definitionRaw: unknown) {
+export async function updateDraft(studyId: string, definitionRaw: unknown, titleRaw?: string) {
   const def = toDanishDraft(instrumentDefinition.parse(definitionRaw));
-  await withAuthorized("studies.edit", async (tx, session) => {
-    const updated = await tx`
-      update studies set draft_definition = ${tx.json(def as never)}, updated_at = now()
-      where id = ${studyId} and org_id = ${session.orgId}
-        and status in ('draft','review','live','paused')
-      returning id`;
+  const problems = validateInstrument(def);
+  const legacyMediaProblem = problems.find((problem) => problem.includes("uses legacy imageUrl"));
+  if (legacyMediaProblem) throw new Error(legacyMediaProblem);
+  if (problems.includes(INCOMPLETE_LOGIC_CONDITION_MESSAGE)) {
+    throw new Error(INCOMPLETE_LOGIC_CONDITION_MESSAGE);
+  }
+  const title = titleRaw?.trim();
+  if (titleRaw !== undefined && !title) throw new Error("Studienavn skal udfyldes.");
+  const orgId = await withAuthorized("studies.edit", async (tx, session) => {
+    const updated = title
+      ? await tx`
+          update studies set title = ${title}, draft_definition = ${tx.json(def as never)}, updated_at = now()
+          where id = ${studyId} and org_id = ${session.orgId}
+            and status in ('draft','review','live','paused')
+          returning id`
+      : await tx`
+          update studies set draft_definition = ${tx.json(def as never)}, updated_at = now()
+          where id = ${studyId} and org_id = ${session.orgId}
+            and status in ('draft','review','live','paused')
+          returning id`;
     if (updated.length !== 1) throw new Error("Studiet blev ikke fundet eller kan ikke redigeres.");
+    return session.orgId;
   });
   revalidatePath(`/studies/${studyId}`);
-  return { ok: true, problems: validateInstrument(def) };
+  revalidatePath(`/studies/${studyId}/builder`);
+  const previewToken = await issueDraftPreviewToken({ studyId, orgId, definition: def });
+  return { ok: true, problems, previewUrl: `${env.appBaseUrl}/p/${previewToken}` };
 }
 
 export async function publishStudy(studyId: string) {
@@ -206,6 +229,8 @@ export async function duplicateStudy(studyId: string) {
                            from studies where id = ${studyId} and org_id = ${session.orgId}`;
     if (!src) throw new Error("Studiet blev ikke fundet");
     const draftDefinition = toDanishDraft(instrumentDefinition.parse(src.draft_definition));
+    const legacyCopyMediaProblem = validateInstrument(draftDefinition).find((problem) => problem.includes("uses legacy imageUrl"));
+    if (legacyCopyMediaProblem) throw new Error(legacyCopyMediaProblem);
     const [copy] = await tx`
       insert into studies (org_id, workspace_id, title, study_type, method_tags, status, owner_id,
                            draft_definition, theme, settings)

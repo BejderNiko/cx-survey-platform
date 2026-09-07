@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_SUBMISSION_INTERACTIONS, requiredInteractionBudget } from "./interaction-budget";
 
 /**
  * Instrument definition: the versioned survey document stored in
@@ -9,6 +10,14 @@ import { z } from "zod";
 
 export const LOCALES = ["da", "en"] as const;
 export type Locale = (typeof LOCALES)[number];
+
+export const PARTICIPANT_DEVICES = ["any", "desktop", "mobile"] as const;
+export type ParticipantDevice = (typeof PARTICIPANT_DEVICES)[number];
+
+/** A client-reported viewport is a product rule, not a security boundary. */
+export function participantDeviceAllows(required: ParticipantDevice, viewport: "desktop" | "mobile"): boolean {
+  return required === "any" || required === viewport;
+}
 
 export const localizedText = z.object({
   da: z.string().optional(),
@@ -40,6 +49,7 @@ export const QUESTION_TYPES = [
   "consent",
   "first_click",
   "preference_test",
+  "prototype_test",
 ] as const;
 export type QuestionType = (typeof QUESTION_TYPES)[number];
 
@@ -51,10 +61,14 @@ export type ConditionOp = z.infer<typeof conditionOp>;
 export const condition = z.object({
   questionCode: z.string(),
   op: conditionOp,
+  effect: z.enum(["show", "hide"]).optional(), // display logic; omitted means legacy "show"
   // string | number | boolean | array of those; unused for (not_)answered
   value: z.unknown().optional(),
 });
 export type Condition = z.infer<typeof condition>;
+
+export const displayConditionMode = z.enum(["all", "any"]);
+export type DisplayConditionMode = z.infer<typeof displayConditionMode>;
 
 export const branchRule = z.object({
   id: z.string(),
@@ -77,12 +91,44 @@ export const stimulusAsset = z.object({
 });
 export type StimulusAsset = z.infer<typeof stimulusAsset>;
 
+export const prototypeTestConfig = z.object({
+  provider: z.literal("figma"),
+  flowType: z.enum(["task", "free"]),
+  // Empty values are valid while authoring a draft. validateInstrument keeps
+  // publication strict once the prototype must be runnable.
+  fileKey: z.string().trim().max(200),
+  prototypeName: z.string().trim().max(200).optional(),
+  startFrameId: z.string().trim().max(200),
+  startFrameName: z.string().trim().max(200).optional(),
+  goalFrameId: z.string().trim().min(1).max(200).optional(),
+  goalFrameName: z.string().trim().max(200).optional(),
+  scaling: z.enum(["scale-down", "contain", "min-zoom", "scale-down-width", "fit-width", "free", "fit", "width"]).default("scale-down"),
+  instructionPosition: z.enum(["top-left", "top-right", "bottom-left", "bottom-right"]).default("bottom-right"),
+  showSuccessScreen: z.boolean().default(true),
+  consentRequired: z.boolean().default(true),
+  passwordRequired: z.boolean().default(false), // never store a Figma password in the instrument
+  lastSyncedAt: z.string().datetime().optional(),
+  frameScreenshots: z.array(z.object({
+    frameId: z.string().trim().min(1).max(200),
+    frameName: z.string().trim().min(1).max(200),
+    screenshot: stimulusAsset.optional(),
+    coordinateScale: z.number().min(0.1).max(8).default(1),
+  })).max(100).default([]),
+  versionId: z.string().trim().max(200).optional(),
+});
+export type PrototypeTestConfig = z.infer<typeof prototypeTestConfig>;
+/** Success is sticky: leaving the goal frame never turns a successful task into a failure. */
+export function prototypeGoalReached(alreadyReached: boolean, frameId: string, goalFrameId: string | undefined): boolean {
+  return alreadyReached || Boolean(goalFrameId && frameId === goalFrameId);
+}
+
 export const question = z.object({
   code: z.string().regex(/^[a-z][a-z0-9_]*$/, "codes are snake_case identifiers"),
   type: z.enum(QUESTION_TYPES),
   label: localizedText,
   helpText: localizedText.optional(),
   required: z.boolean().default(false),
+  hidden: z.boolean().optional(),                  // excluded from participant preview/live flow
   options: z.array(option).optional(),          // choice / likert / ranking types
   randomizeOptions: z.boolean().optional(),
   scale: z
@@ -97,10 +143,12 @@ export const question = z.object({
   imageUrl: z.string().optional(),               // first_click stimulus (data URI or path)
   taskText: localizedText.optional(),            // first_click task instruction
   stimulus: stimulusAsset.optional(),             // secure first-click asset (legacy imageUrl stays readable)
-  stimuli: z.array(stimulusAsset).min(2).max(8).optional(), // preference test assets
+  stimuli: z.array(stimulusAsset).min(1).max(8).optional(), // image-based question assets
   randomizeStimuli: z.boolean().optional(),
   contextOverride: stimulusAsset.nullable().optional(), // reserved question-level override; null hides study context
+  prototype: prototypeTestConfig.optional(),
   visibleIf: z.array(condition).optional(),      // display conditions (AND)
+  visibleIfMode: displayConditionMode.optional(), // omitted keeps legacy AND behavior
   branches: z.array(branchRule).optional(),      // evaluated after answering
   isScreener: z.boolean().optional(),            // disqualifying screener question
 });
@@ -109,6 +157,9 @@ export type Question = z.infer<typeof question>;
 export const block = z.object({
   id: z.string(),
   title: localizedText.optional(),
+  hidden: z.boolean().optional(),
+  visibleIf: z.array(condition).optional(),
+  visibleIfMode: displayConditionMode.optional(),
   questions: z.array(question),
   contextOverride: stimulusAsset.nullable().optional(), // reserved block-level override; undefined inherits
 });
@@ -125,6 +176,7 @@ export const instrumentMessages = z.object({
 export const instrumentDefinition = z.object({
   languages: z.array(z.enum(LOCALES)).min(1),
   defaultLanguage: z.enum(LOCALES),
+  participantDevice: z.enum(PARTICIPANT_DEVICES).default("any"),
   blocks: z.array(block),
   messages: instrumentMessages.default({}),
   contextStimulus: stimulusAsset.optional(),
@@ -137,6 +189,16 @@ export function allQuestions(def: InstrumentDefinition): Question[] {
   return def.blocks.flatMap((b) => b.questions);
 }
 
+export const INCOMPLETE_LOGIC_CONDITION_MESSAGE =
+  "This logic condition is missing a target question and an answer and must be fixed before the test can be saved.";
+
+export function isIncompleteLogicCondition(current: Condition): boolean {
+  const answerNotNeeded = current.op === "answered" || current.op === "not_answered";
+  const valueMissing = current.value === undefined
+    || current.value === ""
+    || (Array.isArray(current.value) && current.value.length === 0);
+  return current.questionCode.trim() === "" || (!answerNotNeeded && valueMissing);
+}
 /** Validation used by the builder and by publish. Returns human-readable problems. */
 
 /** Convert a mutable draft to Danish authoring while leaving published snapshots untouched. */
@@ -206,18 +268,81 @@ export function validateInstrument(def: InstrumentDefinition): string[] {
         problems.push(`Rating question '${q.code}' needs an integer scale spanning 1 to 20 steps.`);
       }
     }
-    if (q.type === "first_click" && !q.imageUrl && !q.stimulus) {
+    if (q.imageUrl) {
+      problems.push(`Question '${q.code}' uses legacy imageUrl. Upload a protected media asset before saving or publishing a new draft.`);
+    }
+    if (q.type === "first_click" && !q.imageUrl && !q.stimulus && !(q.stimuli?.length)) {
       problems.push(`Første-klik-spørgsmålet '${q.code}' mangler et stimulusbillede.`);
     }
     if (q.type === "preference_test" && (!q.stimuli || q.stimuli.length < 2 || q.stimuli.length > 8)) {
       problems.push(`Præferencetesten '${q.code}' skal have mellem 2 og 8 billeder.`);
     }
+    if (q.type === "prototype_test") {
+      if (!q.prototype) problems.push(`Prototype test '${q.code}' is missing Figma configuration.`);
+      if (q.prototype && !q.prototype.fileKey) {
+        problems.push(`Prototype test '${q.code}' is missing a Figma prototype link.`);
+      }
+      if (q.prototype && !q.prototype.startFrameId) {
+        problems.push(`Prototype test '${q.code}' is missing a starting frame.`);
+      }
+      if (q.prototype?.flowType === "task" && !q.prototype.goalFrameId) {
+        problems.push(`Prototype test '${q.code}' is missing a goal frame.`);
+      }
+      if (q.prototype?.flowType === "task" && q.prototype.startFrameId && q.prototype.goalFrameId === q.prototype.startFrameId) {
+        problems.push(`Prototype test '${q.code}' must use different starting and goal frames.`);
+      }
+    }
+  }
+  const requiredBudget = requiredInteractionBudget(qs.filter((q) => !q.hidden).map((q) => q.type));
+  if (requiredBudget > MAX_SUBMISSION_INTERACTIONS) {
+    problems.push(`Instrument interaction budget ${requiredBudget} exceeds bounded limit ${MAX_SUBMISSION_INTERACTIONS}. Reduce prototype or first-click questions.`);
   }
   const order = qs.map((q) => q.code);
+  const hiddenCodes = new Set(def.blocks.flatMap((currentBlock) =>
+    currentBlock.questions.filter((q) => currentBlock.hidden || q.hidden).map((q) => q.code)));
+
+  const validateDisplayCondition = (
+    current: Condition,
+    owner: string,
+    ownerStartIndex: number,
+  ) => {
+    if (isIncompleteLogicCondition(current)) {
+      problems.push(INCOMPLETE_LOGIC_CONDITION_MESSAGE);
+      return;
+    }
+    if (!codes.has(current.questionCode)) {
+      problems.push(`Display condition on '${owner}' references unknown question '${current.questionCode}'.`);
+    } else if (hiddenCodes.has(current.questionCode)) {
+      problems.push(`Display condition on '${owner}' cannot reference hidden question '${current.questionCode}'.`);
+    } else if (order.indexOf(current.questionCode) >= ownerStartIndex) {
+      problems.push(`Display condition on '${owner}' must reference an earlier question.`);
+    }
+  };
+
+  let blockStartIndex = 0;
+  for (const currentBlock of def.blocks) {
+    if (currentBlock.hidden && currentBlock.visibleIf?.length) {
+      problems.push(`Hidden section '${currentBlock.id}' cannot have display conditions.`);
+    }
+    for (const current of currentBlock.visibleIf ?? []) {
+      validateDisplayCondition(current, currentBlock.id, blockStartIndex);
+    }
+    blockStartIndex += currentBlock.questions.length;
+  }
+
   for (const q of qs) {
+    if (q.hidden && q.visibleIf?.length) {
+      problems.push(`Hidden question '${q.code}' cannot have display conditions.`);
+    }
+    if (q.hidden && q.branches?.length) {
+      problems.push(`Hidden question '${q.code}' cannot have routing rules.`);
+    }
     for (const b of q.branches ?? []) {
       if (b.goTo !== "END" && b.goTo !== "DISQUALIFY" && !codes.has(b.goTo)) {
         problems.push(`Branch on '${q.code}' targets unknown question '${b.goTo}'.`);
+      }
+      if (b.goTo !== "END" && b.goTo !== "DISQUALIFY" && hiddenCodes.has(b.goTo)) {
+        problems.push(`Branch on '${q.code}' cannot target hidden question '${b.goTo}'.`);
       }
       if (b.goTo !== "END" && b.goTo !== "DISQUALIFY" && order.indexOf(b.goTo) <= order.indexOf(q.code)) {
         problems.push(`Branch on '${q.code}' must jump forward (to avoid loops).`);
@@ -225,17 +350,15 @@ export function validateInstrument(def: InstrumentDefinition): string[] {
       for (const c of b.when) {
         if (!codes.has(c.questionCode)) {
           problems.push(`Branch condition on '${q.code}' references unknown question '${c.questionCode}'.`);
+        } else if (hiddenCodes.has(c.questionCode)) {
+          problems.push(`Branch condition on '${q.code}' cannot reference hidden question '${c.questionCode}'.`);
         } else if (order.indexOf(c.questionCode) > order.indexOf(q.code)) {
           problems.push(`Branch condition on '${q.code}' cannot reference a later question.`);
         }
       }
     }
     for (const c of q.visibleIf ?? []) {
-      if (!codes.has(c.questionCode)) {
-        problems.push(`Display condition on '${q.code}' references unknown question '${c.questionCode}'.`);
-      } else if (order.indexOf(c.questionCode) >= order.indexOf(q.code)) {
-        problems.push(`Display condition on '${q.code}' must reference an earlier question.`);
-      }
+      validateDisplayCondition(c, q.code, order.indexOf(q.code));
     }
   }
   return problems;
