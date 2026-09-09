@@ -10,37 +10,19 @@ import {
 } from "@tanstack/react-table";
 import Link from "next/link";
 import { useState, useTransition } from "react";
-import { Badge, Button, Input, cn } from "@/components/ui";
-import { CUSTOMER_STATUS, LIFECYCLE, label } from "@/lib/labels";
+import { Button, Input, cn } from "@/components/ui";
 import { bulkTag } from "./actions";
 
 export interface PanelRow {
   id: string;
-  externalId: string | null;
   name: string;
   email: string;
-  language: string;
-  birthYear: number | null;
-  gender: string;
-  city: string;
-  customerStatus: string;
-  lifecycle: string;
-  tags: string[];
-  hasConsent: boolean;
+  car: string;
+  age: string;
+  products: string;
 }
 
 const col = createColumnHelper<PanelRow>();
-
-const LIFECYCLE_TONE: Record<string, string> = {
-  active: "green",
-  invited: "blue",
-  paused: "amber",
-  unsubscribed: "amber",
-  bounced: "red",
-  blocked: "red",
-  anonymized: "gray",
-  archived: "gray",
-};
 
 export function PanelTable({ rows, canEdit }: { rows: PanelRow[]; canEdit: boolean }) {
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -63,7 +45,7 @@ export function PanelTable({ rows, canEdit }: { rows: PanelRow[]; canEdit: boole
       cell: ({ row }) => (
         <input
           type="checkbox"
-          aria-label={`Vælg ${row.original.name}`}
+          aria-label={"Vælg " + row.original.name}
           checked={row.getIsSelected()}
           onChange={row.getToggleSelectedHandler()}
         />
@@ -72,40 +54,28 @@ export function PanelTable({ rows, canEdit }: { rows: PanelRow[]; canEdit: boole
     col.accessor("name", {
       header: "Navn",
       cell: (info) => (
-        <Link href={`/panel/${info.row.original.id}`} className="font-medium text-accent hover:underline">
-          {info.getValue()}
-        </Link>
+        <div className="min-w-40">
+          <Link href={"/panel/" + info.row.original.id} className="font-medium text-accent hover:underline">
+            {info.getValue()}
+          </Link>
+          <Link href={"/panel/" + info.row.original.id} className="mt-1 block text-[11px] font-semibold uppercase tracking-wide text-muted hover:text-accent hover:underline">
+            View profile
+          </Link>
+        </div>
       ),
     }),
     col.accessor("email", { header: "E-mail" }),
-    col.accessor("lifecycle", {
-      header: "Livscyklus",
-      cell: (info) => <Badge tone={LIFECYCLE_TONE[info.getValue()] ?? "gray"}>{label(LIFECYCLE, info.getValue())}</Badge>,
-    }),
-    col.accessor("hasConsent", {
-      header: "Samtykke",
-      cell: (info) => (info.getValue() ? <Badge tone="green">givet</Badge> : <Badge tone="red">mangler</Badge>),
-    }),
-    col.accessor("customerStatus", {
-      header: "Kundestatus",
-      cell: (info) => label(CUSTOMER_STATUS, info.getValue()),
-    }),
-    col.accessor("city", { header: "By" }),
-    col.accessor("language", { header: "Sprog" }),
-    col.accessor("birthYear", { header: "Født", cell: (info) => info.getValue() ?? "—" }),
-    col.accessor("tags", {
-      header: "Tags",
+    col.accessor("car", { header: "Bil" }),
+    col.accessor("age", { header: "Alder" }),
+    col.accessor("products", {
+      header: "Produkter ved OK",
       enableSorting: false,
-      cell: (info) => (
-        <span className="flex flex-wrap gap-1">
-          {info.getValue().map((t) => (
-            <Badge key={t}>{t}</Badge>
-          ))}
-        </span>
-      ),
+      cell: (info) => <span className="block min-w-40 whitespace-normal">{info.getValue()}</span>,
     }),
   ];
 
+  // TanStack Table returns callback-rich state that React Compiler intentionally does not memoize.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
     data: rows,
     columns,
@@ -114,10 +84,10 @@ export function PanelTable({ rows, canEdit }: { rows: PanelRow[]; canEdit: boole
     onRowSelectionChange: setRowSelection,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    getRowId: (r) => r.id,
+    getRowId: (row) => row.id,
   });
 
-  const selectedIds = Object.keys(rowSelection).filter((k) => rowSelection[k]);
+  const selectedIds = Object.keys(rowSelection).filter((key) => rowSelection[key]);
 
   return (
     <div>
@@ -128,7 +98,7 @@ export function PanelTable({ rows, canEdit }: { rows: PanelRow[]; canEdit: boole
             aria-label="Tagnavn"
             placeholder="tagnavn"
             value={tagName}
-            onChange={(e) => setTagName(e.target.value)}
+            onChange={(event) => setTagName(event.target.value)}
             className="h-7 w-40 text-xs"
           />
           <Button
@@ -137,8 +107,8 @@ export function PanelTable({ rows, canEdit }: { rows: PanelRow[]; canEdit: boole
             disabled={pending || !tagName.trim()}
             onClick={() =>
               startTransition(async () => {
-                const res = await bulkTag(selectedIds, tagName);
-                setMessage(`${res.tagged} panelister fik tagget '${tagName.trim().toLowerCase()}'.`);
+                const result = await bulkTag(selectedIds, tagName);
+                setMessage(String(result.tagged) + " panelister fik tagget '" + tagName.trim().toLowerCase() + "'.");
                 setRowSelection({});
                 setTagName("");
               })
@@ -152,23 +122,23 @@ export function PanelTable({ rows, canEdit }: { rows: PanelRow[]; canEdit: boole
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-sm">
           <thead>
-            {table.getHeaderGroups().map((hg) => (
-              <tr key={hg.id}>
-                {hg.headers.map((h) => (
+            {table.getHeaderGroups().map((headerGroup) => (
+              <tr key={headerGroup.id}>
+                {headerGroup.headers.map((header) => (
                   <th
-                    key={h.id}
+                    key={header.id}
                     className={cn(
                       "border-b border-line px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-muted whitespace-nowrap",
-                      h.column.getCanSort() && "cursor-pointer select-none",
+                      header.column.getCanSort() && "cursor-pointer select-none",
                     )}
-                    onClick={h.column.getToggleSortingHandler()}
+                    onClick={header.column.getToggleSortingHandler()}
                     aria-sort={
-                      h.column.getIsSorted() === "asc" ? "ascending"
-                      : h.column.getIsSorted() === "desc" ? "descending" : undefined
+                      header.column.getIsSorted() === "asc" ? "ascending"
+                      : header.column.getIsSorted() === "desc" ? "descending" : undefined
                     }
                   >
-                    {flexRender(h.column.columnDef.header, h.getContext())}
-                    {h.column.getIsSorted() === "asc" ? " ↑" : h.column.getIsSorted() === "desc" ? " ↓" : ""}
+                    {flexRender(header.column.columnDef.header, header.getContext())}
+                    {header.column.getIsSorted() === "asc" ? " ↑" : header.column.getIsSorted() === "desc" ? " ↓" : ""}
                   </th>
                 ))}
               </tr>
@@ -186,7 +156,7 @@ export function PanelTable({ rows, canEdit }: { rows: PanelRow[]; canEdit: boole
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-3 py-6 text-center text-muted">
+                <td colSpan={6} className="px-3 py-6 text-center text-muted">
                   Ingen panelister matcher filtrene.
                 </td>
               </tr>

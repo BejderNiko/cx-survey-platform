@@ -18,6 +18,7 @@ const NAV: { href: string; key: UiKey; icon: ReactNode; requires?: Action }[] = 
   { href: "/studies", key: "nav_studies", icon: <IconStudy />, requires: "studies.view" },
   { href: "/panel", key: "nav_panel", icon: <IconPanel />, requires: "panel.view" },
   { href: "/analytics", key: "nav_analytics", icon: <IconChart />, requires: "analytics.view" },
+  { href: "/feature-requests", key: "nav_feature_requests", icon: <IconCog />, requires: "feature_requests.view" },
   { href: "/admin", key: "nav_admin", icon: <IconCog />, requires: "members.invite" },
 ];
 
@@ -33,7 +34,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen">
-      <nav aria-label="Primær" className="hidden w-60 shrink-0 flex-col border-r border-line bg-surface md:flex">
+      <nav aria-label="Primær" className="sticky top-0 hidden h-screen w-60 shrink-0 self-start flex-col overflow-y-auto border-r border-line bg-surface md:flex">
         <div className="px-5 pb-4 pt-5">
           <div className="font-display text-xl tracking-tight text-heading">
             OK<span className="text-accent"> · CX</span>

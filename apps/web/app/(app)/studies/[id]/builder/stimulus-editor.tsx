@@ -14,7 +14,7 @@ export function StimulusEditor({
   onRemove,
 }: {
   studyId: string;
-  kind: "context" | "preference" | "first_click";
+  kind: "context" | "preference" | "first_click" | "prototype_frame";
   label: string;
   value: StimulusAsset | null;
   onChange: (asset: StimulusAsset) => void;

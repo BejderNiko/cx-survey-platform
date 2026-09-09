@@ -46,6 +46,7 @@ type PanelistFields = {
 type PanelistWrite = PanelistFields & {
   id: string;
   attributes: Record<string, string>;
+  tags?: string[];
 };
 
 function chunks<T>(items: T[], size = WRITE_CHUNK_SIZE): T[][] {
@@ -358,6 +359,21 @@ async function insertCreateConsents(
   }
 }
 
+async function ensureImportedAttributeFields(
+  tx: Tx,
+  orgId: string,
+  rows: PanelistWrite[],
+): Promise<void> {
+  const keys = [...new Set(rows.flatMap((row) => Object.keys(row.attributes)))];
+  for (const key of keys) {
+    const label = key.replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase());
+    const fieldType = key === "age" || key === "tests_completed" ? "number" : "text";
+    await tx`
+      insert into custom_fields (org_id, key, label, field_type)
+      values (${orgId}, ${key}, ${label}, ${fieldType})
+      on conflict (org_id, key) do nothing`;
+  }
+}
 async function upsertAttributes(
   tx: Tx,
   orgId: string,
@@ -391,6 +407,49 @@ async function upsertAttributes(
   }
 }
 
+async function replaceImportedTags(
+  tx: Tx,
+  orgId: string,
+  rows: PanelistWrite[],
+): Promise<void> {
+  const taggedRows = rows.filter((row) => row.tags !== undefined);
+  if (taggedRows.length === 0) return;
+
+  const panelistIds = taggedRows.map((row) => row.id);
+  await tx`
+    delete from panelist_tags
+    where org_id = ${orgId} and panelist_id = any(${panelistIds})`;
+
+  const tagNames = [...new Set(taggedRows.flatMap((row) => row.tags ?? []))];
+  if (tagNames.length === 0) return;
+
+  await tx`
+    insert into tags (org_id, name)
+    select ${orgId}, input.name
+    from unnest(${tagNames}::text[]) as input(name)
+    on conflict (org_id, name) do nothing`;
+
+  const tagRows = await tx`
+    select id, name from tags
+    where org_id = ${orgId} and name = any(${tagNames})`;
+  const tagIdByName = new Map(tagRows.map((tag) => [tag.name as string, tag.id as string]));
+  const links = taggedRows.flatMap((row) =>
+    (row.tags ?? []).flatMap((name) => {
+      const tagId = tagIdByName.get(name);
+      return tagId ? [{ panelistId: row.id, tagId }] : [];
+    }),
+  );
+  for (const group of chunks(links)) {
+    await tx`
+      insert into panelist_tags (panelist_id, tag_id, org_id)
+      select input.panelist_id, input.tag_id, ${orgId}
+      from unnest(
+        ${group.map((link) => link.panelistId)}::uuid[],
+        ${group.map((link) => link.tagId)}::uuid[]
+      ) as input(panelist_id, tag_id)
+      on conflict (panelist_id, tag_id) do nothing`;
+  }
+}
 export async function writePanelImport(
   tx: Tx,
   input: {
@@ -404,11 +463,13 @@ export async function writePanelImport(
     id: randomUUID(),
     ...fieldsFor(row),
     attributes: row.attributes,
+    tags: row.tags,
   }));
   const updates: PanelistWrite[] = input.plan.updates.map(({ row, existingId }) => ({
     id: existingId,
     ...fieldsFor(row),
     attributes: row.attributes,
+    tags: row.tags,
   }));
 
   await insertPanelists(tx, input.orgId, input.batchId, creates);
@@ -419,7 +480,9 @@ export async function writePanelImport(
     input.filename,
     creates.map((row) => row.id),
   );
+  await ensureImportedAttributeFields(tx, input.orgId, [...creates, ...updates]);
   await upsertAttributes(tx, input.orgId, [...creates, ...updates]);
+  await replaceImportedTags(tx, input.orgId, [...creates, ...updates]);
 
   const [[panelTotal], [batchLinked]] = await Promise.all([
     tx`select count(*)::int as count from panelists where org_id = ${input.orgId}`,

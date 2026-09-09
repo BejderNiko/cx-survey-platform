@@ -3,13 +3,20 @@
 import { useState, useTransition } from "react";
 import { Button, Input, Label, Select } from "@/components/ui";
 import { createPanelInvite, createPublicLink } from "../../distribution-actions";
+import { PanelFilterPanel, type FilterField, type MessageOption } from "../../../panel/panel-filter-panel";
 
 export function CreateDistributionForms({
   studyId,
   segments,
+  filterFields,
+  messages,
+  panelTotal,
 }: {
   studyId: string;
   segments: { id: string; name: string }[];
+  filterFields: FilterField[];
+  messages: MessageOption[];
+  panelTotal: number;
 }) {
   const [pending, startTransition] = useTransition();
   const [linkName, setLinkName] = useState("");
@@ -20,6 +27,7 @@ export function CreateDistributionForms({
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [panelFilters, setPanelFilters] = useState("[]");
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-2">
@@ -81,6 +89,7 @@ export function CreateDistributionForms({
                 const res = await createPanelInvite({
                   studyId, name: inviteName, segmentId: segmentId || null, method,
                   sampleSize: method === "random" ? sampleSize : undefined,
+                  filters: panelFilters,
                 });
                 setResult(
                   `${res.invited} af ${res.candidates} kandidater inviteret (${res.eligible} egnede efter kontaktregler; udeladt: ${
@@ -97,6 +106,17 @@ export function CreateDistributionForms({
         </Button>
       </div>
       {result && <p className="text-sm text-success">{result}</p>}
+      <PanelFilterPanel
+        fields={filterFields}
+        messages={messages}
+        initialFilters={[]}
+        total={panelTotal}
+        filtered={null}
+        available={null}
+        navigation={false}
+        onFiltersChange={setPanelFilters}
+      />
+      <p className="text-xs text-muted">Filter groups use AND and are frozen with panelist IDs, seed and contact rules in the audience snapshot.</p>
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
     </div>
   );

@@ -7,6 +7,7 @@ import bcrypt from "bcryptjs";
 import { type Action, type Role, assertCan } from "@ok/domain";
 import { adminSql, withUser, type Tx } from "./db";
 import { env } from "./env";
+import { FIGMA_ACCESS_COOKIE, FIGMA_ACCESS_COOKIE_PATH } from "./figma-token";
 
 /**
  * Local development authentication: seeded users with bcrypt password hashes
@@ -79,6 +80,7 @@ export async function createSessionCookie(user: SessionUser): Promise<void> {
 export async function destroySession(): Promise<void> {
   const jar = await cookies();
   jar.delete(COOKIE);
+  jar.set(FIGMA_ACCESS_COOKIE, "", { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: FIGMA_ACCESS_COOKIE_PATH, maxAge: 0 });
 }
 
 export const getSession = cache(async (): Promise<SessionUser | null> => {

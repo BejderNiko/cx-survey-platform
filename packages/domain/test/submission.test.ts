@@ -50,6 +50,21 @@ describe("respondent submission validation", () => {
     if (result.ok) expect(result.value.answers.map((a) => a.code)).toEqual(["nps_score", "contact"]);
   });
 
+  it("does not require a question hidden from participants", () => {
+    const hidden = structuredClone(definition);
+    hidden.blocks[0].questions[1].hidden = true;
+    const result = validateSubmission(hidden, {
+      status: "completed",
+      answers: [
+        { code: "nps_score", type: "nps", value: 3 },
+        { code: "contact", type: "consent", value: false },
+      ],
+      interactions: [],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.answers.map((answer) => answer.code)).toEqual(["nps_score", "contact"]);
+  });
+
   it("rejects missing required answers", () => {
     const result = validateSubmission(definition, {
       status: "completed",
@@ -93,6 +108,43 @@ describe("respondent submission validation", () => {
     });
     expect(result).toMatchObject({ ok: false });
     if (!result.ok) expect(result.errors[0]).toContain("does not match survey path");
+  });
+  it("accepts modern first-click metadata bound to the published stimulus", () => {
+    const assetId = "11111111-1111-4111-8111-111111111111";
+    const modern = instrumentDefinition.parse({
+      languages: ["en"], defaultLanguage: "en", messages: {}, blocks: [{ id: "task", questions: [{
+        code: "click", type: "first_click", label: { en: "Click" }, required: true,
+        stimuli: [{ id: "stimulus-a", assetId, altText: "Prototype" }],
+      }] }],
+    });
+    const result = validateSubmission(modern, {
+      status: "completed",
+      answers: [{ code: "click", type: "first_click", value: { x: 30, y: 20, selectedAssetId: assetId } }],
+      interactions: [{ code: "click", eventType: "first_click", payload: {
+        x: 30, y: 20, naturalWidth: 100, naturalHeight: 100, elapsedMs: 50, assetId, stimulusIndex: 0,
+      } }],
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects forged first-click asset binding", () => {
+    const assetId = "11111111-1111-4111-8111-111111111111";
+    const modern = instrumentDefinition.parse({
+      languages: ["en"], defaultLanguage: "en", messages: {}, blocks: [{ id: "task", questions: [{
+        code: "click", type: "first_click", label: { en: "Click" }, required: true,
+        stimuli: [{ id: "stimulus-a", assetId, altText: "Prototype" }],
+      }] }],
+    });
+    const result = validateSubmission(modern, {
+      status: "completed",
+      answers: [{ code: "click", type: "first_click", value: { x: 30, y: 20, selectedAssetId: assetId } }],
+      interactions: [{ code: "click", eventType: "first_click", payload: {
+        x: 30, y: 20, naturalWidth: 100, naturalHeight: 100, elapsedMs: 50,
+        assetId: "22222222-2222-4222-8222-222222222222", stimulusIndex: 0,
+      } }],
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toContain("asset binding does not match");
   });
   it("rejects forged or incomplete first-click metadata", () => {
     const firstClickDefinition = instrumentDefinition.parse({

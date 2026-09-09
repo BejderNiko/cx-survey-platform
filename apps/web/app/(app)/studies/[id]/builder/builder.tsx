@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import {
   groupedQuestionTypes,
   QUESTION_TYPE_METADATA,
@@ -51,12 +51,14 @@ export function Builder({
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile" | null>(null);
   const [newType, setNewType] = useState<Question["type"]>("nps");
   const [pending, startTransition] = useTransition();
+  const editRevision = useRef(0);
 
   const questions = useMemo(() => def.blocks.flatMap((b) => b.questions), [def]);
   const problems = useMemo(() => validateInstrument(def), [def]);
   const current = questions.find((q) => q.code === selected) ?? null;
 
   function mutate(fn: (d: InstrumentDefinition) => void) {
+    editRevision.current += 1;
     setDef((d) => {
       const copy = structuredClone(d);
       fn(copy);
@@ -113,13 +115,21 @@ export function Builder({
   }
 
   function move(code: string, dir: -1 | 1) {
+    const currentIndex = questions.findIndex((q) => q.code === code);
+    const targetIndex = currentIndex + dir;
+    if (currentIndex === -1 || targetIndex < 0 || targetIndex >= questions.length) return;
     mutate((d) => {
       const flat = d.blocks.flatMap((b) => b.questions);
       const i = flat.findIndex((q) => q.code === code);
       const j = i + dir;
       if (i === -1 || j < 0 || j >= flat.length) return;
-      [flat[i], flat[j]] = [flat[j], flat[i]];
-      d.blocks = [{ id: d.blocks[0]?.id ?? "b1", questions: flat }];
+      const locations = d.blocks.map((block) => block.questions.map((question) => question.code));
+      const fromBlock = locations.findIndex((codes) => codes.includes(flat[i].code));
+      const toBlock = locations.findIndex((codes) => codes.includes(flat[j].code));
+      const fromIndex = d.blocks[fromBlock].questions.findIndex((question) => question.code === flat[i].code);
+      const toIndex = d.blocks[toBlock].questions.findIndex((question) => question.code === flat[j].code);
+      [d.blocks[fromBlock].questions[fromIndex], d.blocks[toBlock].questions[toIndex]] =
+        [d.blocks[toBlock].questions[toIndex], d.blocks[fromBlock].questions[fromIndex]];
     });
   }
 
@@ -131,14 +141,24 @@ export function Builder({
   }
 
   function save() {
+    const revisionAtStart = editRevision.current;
+    const definitionAtStart = structuredClone(def);
     startTransition(async () => {
-      const res = await updateDraft(studyId, def);
-      setDirty(false);
-      setSaveMsg(
-        res.problems.length === 0
-          ? "Kladden er gemt."
-          : `Kladden er gemt med ${res.problems.length} valideringsadvarsel(-ler).`,
-      );
+      try {
+        const res = await updateDraft(studyId, definitionAtStart);
+        if (revisionAtStart !== editRevision.current) {
+          setSaveMsg("En ældre version blev gemt. Gem igen for at gemme de seneste ændringer.");
+          return;
+        }
+        setDirty(false);
+        setSaveMsg(
+          res.problems.length === 0
+            ? "Kladden er gemt."
+            : `Kladden er gemt med ${res.problems.length} valideringsadvarsel(-ler).`,
+        );
+      } catch {
+        setSaveMsg("Kladden kunne ikke gemmes. Prøv igen.");
+      }
     });
   }
 
@@ -148,6 +168,20 @@ export function Builder({
         <Button onClick={save} disabled={pending || !dirty}>
           {dirty ? "Gem kladde" : "Gemt"}
         </Button>
+        <label className="flex items-center gap-2 text-sm">
+          <span className="text-muted">Deltagerenhed</span>
+          <Select
+            aria-label="Deltagerenhed"
+            value={def.participantDevice}
+            onChange={(e) => mutate((draft) => {
+              draft.participantDevice = e.target.value as InstrumentDefinition["participantDevice"];
+            })}
+          >
+            <option value="any">Alle enheder</option>
+            <option value="desktop">Desktop</option>
+            <option value="mobile">Mobil</option>
+          </Select>
+        </label>
         <Button variant="secondary" onClick={() => setPreviewMode(previewMode ? null : "desktop")}>
           {previewMode ? "Luk forhåndsvisning" : "Forhåndsvisning"}
         </Button>
@@ -435,8 +469,8 @@ function QuestionEditor({
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
-              checked={question.randomizeStimuli ?? false}
-              onChange={(event) => onChange({ randomizeStimuli: event.target.checked })}
+              checked={question.type === "preference_test" ? (question.randomizeStimuli ?? false) : false}
+              onChange={(event) => question.type === "preference_test" ? onChange({ randomizeStimuli: event.target.checked }) : undefined}
             />
             Bland billedernes rækkefølge for hver respondent
           </label>

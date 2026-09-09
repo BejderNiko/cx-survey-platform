@@ -1,8 +1,23 @@
 "use client";
 
-import { useCallback, useRef } from "react";
-import type { InstrumentDefinition, Locale } from "@ok/domain";
+import { useCallback, useRef, useSyncExternalStore } from "react";
+import { participantDeviceAllows, type InstrumentDefinition, type Locale } from "@ok/domain";
 import { SurveyRenderer, type AnswerPayload, type InteractionPayload } from "./renderer";
+
+type Viewport = "desktop" | "mobile";
+
+function getViewport(): Viewport {
+  return window.innerWidth < 640 ? "mobile" : "desktop";
+}
+
+function subscribeViewport(onChange: () => void) {
+  window.addEventListener("resize", onChange);
+  return () => window.removeEventListener("resize", onChange);
+}
+
+function getServerViewport(): null {
+  return null;
+}
 
 /** Live wrapper: starts the response lazily and submits on completion. */
 export function PublicRuntime({
@@ -17,6 +32,8 @@ export function PublicRuntime({
   language?: string | null;
 }) {
   const responseIdPromise = useRef<Promise<string | null> | null>(null);
+  const viewport = useSyncExternalStore(subscribeViewport, getViewport, getServerViewport);
+  const deviceAllowed = viewport === null ? null : participantDeviceAllows(definition.participantDevice, viewport);
   const requestedLanguage = language === "en" || language === "da" ? language : null;
   const resolvedLanguage: Locale = requestedLanguage && definition.languages.includes(requestedLanguage)
     ? requestedLanguage
@@ -24,6 +41,7 @@ export function PublicRuntime({
 
 
   const ensureStarted = useCallback((): Promise<string | null> => {
+    if (deviceAllowed !== true) return Promise.resolve(null);
     if (responseIdPromise.current) return responseIdPromise.current;
     const pending = fetch("/api/respond/start", {
       method: "POST",
@@ -42,7 +60,7 @@ export function PublicRuntime({
       if (!responseId && responseIdPromise.current === pending) responseIdPromise.current = null;
     });
     return pending;
-  }, [token, resolvedLanguage]);
+  }, [deviceAllowed, token, resolvedLanguage]);
 
   const onComplete = useCallback(
     async (result: {
@@ -79,14 +97,22 @@ export function PublicRuntime({
       onPointerDown={() => void ensureStarted()}
       onKeyDown={() => void ensureStarted()}
     >
-      <SurveyRenderer
-        definition={definition}
-        locale={resolvedLanguage}
-        mode="live"
-        studyTitle={studyTitle}
-        onComplete={onComplete}
-        assetToken={token}
-      />
+      {deviceAllowed === false ? (
+        <p role="alert" className="mx-auto max-w-xl rounded-lg border border-line bg-surface p-6 text-center">
+          Denne undersøgelse kan ikke besvares fra denne enhed.
+        </p>
+      ) : deviceAllowed === null ? (
+        <p className="mx-auto max-w-xl p-6 text-center text-muted">Indlæser undersøgelse…</p>
+      ) : (
+        <SurveyRenderer
+          definition={definition}
+          locale={resolvedLanguage}
+          mode="live"
+          studyTitle={studyTitle}
+          onComplete={onComplete}
+          assetToken={token}
+        />
+      )}
     </div>
   );
 }
