@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   allQuestions,
+  logicDrivenProgress,
   lt,
   nextStep,
   recordSubmissionInteraction,
@@ -69,7 +70,6 @@ export function SurveyRenderer({
   }, [definition, locale]);
 
   const questions = useMemo(() => allQuestions(definition).filter((question) => !question.hidden), [definition]);
-  const total = questions.length;
 
   const goNext = useCallback(
     async (fromCode: string | null, currentAnswers: Record<string, unknown>) => {
@@ -162,7 +162,7 @@ export function SurveyRenderer({
   };
 
   const progress = current
-    ? Math.round(((questions.findIndex((q) => q.code === current.code) + 1) / total) * 100)
+    ? logicDrivenProgress(definition, current.code, answers)
     : phase === "done" || phase === "disqualified" ? 100 : 0;
 
   const msg = (key: "intro" | "thankYou" | "disqualified") => lt(definition.messages?.[key], locale);
@@ -223,6 +223,7 @@ export function SurveyRenderer({
                 {lt(current.label, locale)}
                 {current.required && <span aria-hidden className="text-danger"> *</span>}
               </legend>
+              <QuestionMedia question={current} assetToken={assetToken} />
               {current.helpText && <p className="mt-1 text-sm text-muted">{lt(current.helpText, locale)}</p>}
               <div className="mt-4">
                 <QuestionInput
@@ -558,6 +559,7 @@ function QuestionInput({
                   key={stimulus.id}
                   imageUrl={stimulusUrl(stimulus, assetToken)}
                   altText={stimulus.altText}
+                  displayWidthPercent={stimulus.displayWidthPercent}
                   value={stimuli.length === 1 || response?.selectedAssetId === stimulus.assetId ? response : undefined}
                   onClickPoint={(pt, meta) => recordClick(stimulus.assetId, pt, { ...meta, stimulusIndex: index })}
                 />
@@ -592,10 +594,11 @@ function QuestionInput({
 }
 
 function FirstClickImage({
-  imageUrl, altText, value, onClickPoint,
+  imageUrl, altText, displayWidthPercent, value, onClickPoint,
 }: {
   imageUrl: string;
   altText: string;
+  displayWidthPercent?: number;
   value: { x: number; y: number } | undefined;
   onClickPoint: (pt: { x: number; y: number }, meta: Record<string, unknown>) => void;
 }) {
@@ -613,6 +616,7 @@ function FirstClickImage({
         ref={imgRef}
         src={imageUrl}
         alt={altText}
+        style={{ width: `${displayWidthPercent ?? 100}%` }}
         className="max-w-full cursor-crosshair rounded-md border border-line"
         onClick={(e) => {
           const img = imgRef.current;
@@ -708,7 +712,8 @@ function PreferenceInput({
             <img
               src={stimulusUrl(stimulus, assetToken)}
               alt={stimulus.altText}
-              className="h-48 w-full max-w-full object-contain"
+              style={{ width: `${stimulus.displayWidthPercent ?? 100}%` }}
+              className="h-48 max-w-full object-contain"
             />
             <span className={cn("mt-2 block text-sm", selected ? "font-semibold text-accent" : "text-muted")}>
               {selected ? "Valgt" : "Vælg dette billede"}
@@ -716,6 +721,27 @@ function PreferenceInput({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+function QuestionMedia({ question, assetToken }: { question: Question; assetToken?: string }) {
+  if (["first_click", "preference_test", "prototype_test"].includes(question.type)) return null;
+  const stimuli = question.stimuli ?? [];
+  if (stimuli.length === 0) return null;
+  return (
+    <div className="mt-3 space-y-3" aria-label="Question image">
+      {stimuli.map((asset) => (
+        <figure key={asset.id} className="overflow-hidden rounded-lg border border-line bg-background p-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={stimulusUrl(asset, assetToken)}
+            alt={asset.altText}
+            className="h-auto max-w-full rounded object-contain"
+            style={{ width: `${asset.displayWidthPercent ?? 100}%` }}
+          />
+        </figure>
+      ))}
     </div>
   );
 }

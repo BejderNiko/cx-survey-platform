@@ -5,7 +5,7 @@ import {
   validateInstrument,
   type InstrumentDefinition,
 } from "../src/instrument";
-import { evaluateCondition, nextStep, visiblePath } from "../src/logic";
+import { evaluateCondition, logicDrivenProgress, nextStep, visiblePath } from "../src/logic";
 
 const def: InstrumentDefinition = instrumentDefinition.parse({
   languages: ["da", "en"],
@@ -215,3 +215,8 @@ describe("survey logic engine", () => {
     expect(validateInstrument(bad)).toContain("Display condition on 'b2' must reference an earlier question.");
   });
 });
+
+  it("calculates progress from the logic-driven respondent path", () => {
+    expect(logicDrivenProgress(def, "promoter_why", { screener: "yes", nps_score: 10 })).toBe(75);
+    expect(logicDrivenProgress(def, "detractor_why", { screener: "yes", nps_score: 2 })).toBe(60);
+  });

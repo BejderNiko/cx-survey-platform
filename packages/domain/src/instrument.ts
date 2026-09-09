@@ -88,6 +88,7 @@ export const stimulusAsset = z.object({
   id: z.string().min(1).max(100),
   assetId: z.string().uuid(),
   altText: z.string().trim().min(1).max(500),
+  displayWidthPercent: z.number().int().min(20).max(100).optional(),
 });
 export type StimulusAsset = z.infer<typeof stimulusAsset>;
 

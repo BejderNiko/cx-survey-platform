@@ -10,6 +10,7 @@ import { DISTRIBUTION_KIND, INVITATION_STATUS, OUTBOX_STATUS, label } from "@/li
 import { getPanelFilterUiData } from "@/lib/data/panel-filter-ui";
 import { CreateDistributionForms } from "./distribution-forms";
 import { OutboxMessageView } from "./outbox-message";
+import { CopyLinkButton } from "./copy-link-button";
 
 /** Udsend-fanen: links, panelinvitationer, leveringstragt og simuleret udbakke. */
 export default async function StudyDistributionPage({ params }: { params: Promise<{ id: string }> }) {
@@ -101,7 +102,8 @@ export default async function StudyDistributionPage({ params }: { params: Promis
                     <Td>
                       {pub ? (
                         <span className="flex items-center gap-2">
-                          <a href={pub.url} target="_blank" className="text-xs text-accent underline break-all">{pub.url}</a>
+                          <a href={pub.url} target="_blank" rel="noreferrer" className="text-xs text-accent underline break-all">{pub.url}</a>
+                          <CopyLinkButton url={pub.url} />
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src={pub.qr} alt={`QR-kode til ${d.name}`} width={48} height={48} />
                         </span>

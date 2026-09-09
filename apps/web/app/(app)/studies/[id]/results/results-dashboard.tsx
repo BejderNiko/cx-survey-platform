@@ -26,8 +26,10 @@ import {
   type ResultFilter,
 } from "@/lib/results-filters";
 import { ReportJobs } from "./report-jobs";
+import { OpenAnswerSearch } from "./open-answer-search";
 
 type Search = { filters?: string; ask?: string; filterError?: string };
+type FirstClickInteraction = { response_id?: unknown; payload: unknown };
 
 export async function ResultsDashboard({ studyId, search }: { studyId: string; search: Search }) {
   const session = await requireSession();
@@ -90,6 +92,20 @@ export async function ResultsDashboard({ studyId, search }: { studyId: string; s
   const draftFilters = draft?.filters ?? [];
   const combinedDraft = mergeResultFilters(filters, draftFilters);
   const dynamicTagCounts = tagFacetCounts(responseRows, filters);
+  const firstClickByQuestion = new Map<string, FirstClickInteraction[]>();
+  for (const interaction of data.interactions) {
+    if (String(interaction.event_type) !== "first_click" || !filteredIds.has(String(interaction.response_id))) continue;
+    const click: FirstClickInteraction = { response_id: interaction.response_id, payload: interaction.payload };
+    const key = String(interaction.question_code);
+    firstClickByQuestion.set(key, [...(firstClickByQuestion.get(key) ?? []), click]);
+  }
+  const openAnswerItems = data.answers.flatMap((answer) => {
+    const question = allQuestions(definition).find((item) => item.code === String(answer.question_code));
+    const responseId = String(answer.response_id);
+    if (!question || !["short_text", "long_text"].includes(question.type) || !filteredIds.has(responseId)) return [];
+    const text = typeof answer.value === "string" || typeof answer.value === "number" ? String(answer.value) : "";
+    return text.trim() ? [{ responseId, questionCode: question.code, questionLabel: lt(question.label, definition.defaultLanguage) || question.code, text }] : [];
+  });
 
   return (
     <div className="space-y-4">
@@ -141,8 +157,10 @@ export async function ResultsDashboard({ studyId, search }: { studyId: string; s
       {allQuestions(definition).map((question) => question.type === "prototype_test" ? (
         <PrototypeResult key={question.code} studyId={studyId} studyVersionId={data.version ? String(data.version.id) : ""} question={question} values={questionValues(question.code)} paths={(pathsByQuestion.get(question.code) ?? []).filter((path) => filteredIds.has(path.responseId))} filters={filters} canRenamePaths={can(session.role, "reports.create")} pathLabels={Object.fromEntries([...pathLabels].filter(([key]) => key.startsWith(`${question.code}\u0000`)).map(([key, value]) => [key.slice(question.code.length + 1), value]))} />
       ) : (
-        <QuestionResult key={question.code} question={question} values={questionValues(question.code)} filters={filters} hrefFor={hrefFor} />
+        <QuestionResult key={question.code} question={question} values={questionValues(question.code)} filters={filters} hrefFor={hrefFor} firstClickInteractions={firstClickByQuestion.get(question.code) ?? []} />
       ))}
+
+      <OpenAnswerSearch items={openAnswerItems} />
 
       <ReportJobs studyId={studyId} filters={filters} />
 
@@ -164,7 +182,7 @@ export async function ResultsDashboard({ studyId, search }: { studyId: string; s
   );
 }
 
-function QuestionResult({ question, values, filters, hrefFor }: { question: Question; values: unknown[]; filters: ResultFilter[]; hrefFor: (filters: ResultFilter[]) => string }) {
+function QuestionResult({ question, values, filters, hrefFor, firstClickInteractions }: { question: Question; values: unknown[]; filters: ResultFilter[]; hrefFor: (filters: ResultFilter[]) => string; firstClickInteractions: { payload: unknown }[] }) {
   const title = <span>{lt(question.label, "da") || question.code} {question.visibleIf?.length ? <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">LOGIC</span> : null} <span className="text-xs font-normal text-muted">n = {values.length}</span></span>;
   if (question.type === "nps") {
     const result = computeNps(values);
@@ -175,10 +193,19 @@ function QuestionResult({ question, values, filters, hrefFor }: { question: Ques
     return <Card title={title}><Bars question={question} options={options} values={values} filters={filters} hrefFor={hrefFor} /></Card>;
   }
   if (question.type === "consent") return <Card title={title}><Bars question={question} options={[{ value: "true", label: "Ja" }, { value: "false", label: "Nej" }]} values={values} filters={filters} hrefFor={hrefFor} /></Card>;
+  if (question.type === "first_click") return <FirstClickHeatmap question={question} interactions={firstClickInteractions} />;
   const numeric = values.map(Number).filter(Number.isFinite);
   return <Card title={title}><p className="text-sm text-muted">Svar: {values.length}{numeric.length ? ` · gennemsnit ${fmtNumber(numeric.reduce((sum, value) => sum + value, 0) / numeric.length, 2)} (${numeric.reduce((sum, value) => sum + value, 0)} ÷ ${numeric.length})` : ""}</p></Card>;
 }
 
+function FirstClickHeatmap({ question, interactions }: { question: Question; interactions: FirstClickInteraction[] }) {
+  const clicks = interactions.map((item) => item.payload as Record<string, unknown>).map((payload) => {
+    const width = Number(payload.naturalWidth) || 1;
+    const height = Number(payload.naturalHeight) || 1;
+    return { x: Math.max(0, Math.min(100, Number(payload.x) / width * 100)), y: Math.max(0, Math.min(100, Number(payload.y) / height * 100)) };
+  }).filter((click) => Number.isFinite(click.x) && Number.isFinite(click.y));
+  return <Card title={`${lt(question.label, "da") || question.code} · klik-heatmap`}><div className="relative aspect-video overflow-hidden rounded-lg border border-line bg-[#f7efeb]" aria-label="Heatmap over første klik"><div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(70,0,25,.06),transparent_65%)]" />{clicks.map((click, index) => <span key={index} className="absolute h-10 w-10 -translate-x-1/2 -translate-y-1/2 rounded-full bg-red-500/40 blur-md" style={{ left: `${click.x}%`, top: `${click.y}%` }} />)}</div><p className="mt-2 text-xs text-muted">{clicks.length} klik · x = billedbredde · y = billedhøjde. Nævner: filtrerede første-klik-events.</p></Card>;
+}
 function Bars({ question, options, values, filters, hrefFor }: { question: Question; options: { value: string; label: string }[]; values: unknown[]; filters: ResultFilter[]; hrefFor: (filters: ResultFilter[]) => string }) {
   const counts = new Map<string, number>();
   for (const raw of values) for (const value of Array.isArray(raw) ? raw : [raw]) counts.set(String(value), (counts.get(String(value)) ?? 0) + 1);

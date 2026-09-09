@@ -19,6 +19,22 @@ export async function createPublicLink(studyId: string, name: string) {
       where study_id = ${studyId} and org_id = ${session.orgId}
       order by version_number desc limit 1`;
     if (!version) throw new Error("Publicér studiet, før du opretter links.");
+    const [existing] = await tx`
+      select id, public_token from distributions
+      where study_id = ${studyId} and org_id = ${session.orgId}
+        and kind = 'public_link' and status = 'active' and public_token is not null
+      order by created_at asc limit 1`;
+    if (existing) {
+      await tx`
+        update distributions set study_version_id = ${version.id}, name = ${name || "Offentligt link"}
+        where id = ${existing.id} and org_id = ${session.orgId}`;
+      await audit(tx, {
+        orgId: session.orgId, actorUserId: session.userId,
+        action: "distribution.update", entityType: "distribution", entityId: existing.id as string,
+        details: { kind: "public_link", stable: true, versionId: version.id },
+      });
+      return { url: `${env.appBaseUrl}/s/${existing.public_token}`, reused: true };
+    }
     const publicToken = token("pub");
     const [dist] = await tx`
       insert into distributions (org_id, study_id, study_version_id, kind, name, public_token, created_by)
@@ -27,9 +43,9 @@ export async function createPublicLink(studyId: string, name: string) {
     await audit(tx, {
       orgId: session.orgId, actorUserId: session.userId,
       action: "distribution.create", entityType: "distribution", entityId: dist.id as string,
-      details: { kind: "public_link" },
+      details: { kind: "public_link", stable: true },
     });
-    return { url: `${env.appBaseUrl}/s/${publicToken}` };
+    return { url: `${env.appBaseUrl}/s/${publicToken}`, reused: false };
   });
   revalidatePath(`/studies/${studyId}`);
   revalidatePath(`/studies/${studyId}/udsend`);

@@ -6,6 +6,7 @@ import { destroySession, requireSession } from "@/lib/auth";
 import { t, type UiKey } from "@/lib/i18n";
 import { ROLE_LABEL, label } from "@/lib/labels";
 import { NavLink } from "./nav-link";
+import { FeedbackWidget } from "@/components/feedback-widget";
 
 async function signOut() {
   "use server";
@@ -92,6 +93,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         <main className="min-w-0 flex-1 p-4 md:p-8">
           <div className="page-in mx-auto max-w-6xl">{children}</div>
         </main>
+        {can(session.role, "feature_requests.create") && <FeedbackWidget />}
       </div>
     </div>
   );

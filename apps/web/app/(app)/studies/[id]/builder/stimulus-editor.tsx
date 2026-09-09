@@ -22,8 +22,10 @@ export function StimulusEditor({
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [altText, setAltText] = useState(value?.altText ?? "");
+  const [displayWidthPercent, setDisplayWidthPercent] = useState(value?.displayWidthPercent ?? 100);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
 
   function upload() {
     const file = fileRef.current?.files?.[0];
@@ -36,14 +38,17 @@ export function StimulusEditor({
       setMessage(null);
       const result = await uploadStimulus(studyId, formData);
       if (!result.ok) { setMessage(result.error); return; }
-      onChange(result.asset);
+      onChange({ ...result.asset, displayWidthPercent });
       setMessage("Billedet er uploadet. Gem kladden for at anvende det.");
       if (fileRef.current) fileRef.current.value = "";
+      setSelectedFile(null);
     });
   }
 
   function remove() {
     setAltText("");
+    setDisplayWidthPercent(100);
+    setSelectedFile(null);
     setMessage(null);
     onRemove?.();
   }
@@ -53,7 +58,7 @@ export function StimulusEditor({
       <Label>{label}</Label>
       {value && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={`/api/stimuli/${value.assetId}`} alt={value.altText} className="max-h-56 max-w-full rounded-md border border-line object-contain" />
+        <img src={`/api/stimuli/${value.assetId}`} alt={value.altText} style={{ width: `${value.displayWidthPercent ?? displayWidthPercent}%` }} className="max-h-56 max-w-full rounded-md border border-line object-contain" />
       )}
       <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
         <Input
@@ -63,14 +68,29 @@ export function StimulusEditor({
           aria-label={`${label}: alt-tekst`}
           maxLength={300}
         />
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/png,image/jpeg,image/webp"
-          aria-label={`${label}: vælg fil`}
-          className="block max-w-full text-sm"
-        />
+        <div className="flex items-center gap-2 rounded-md border border-line bg-background p-1">
+          <label className="inline-flex cursor-pointer items-center rounded bg-accent px-3 py-2 text-sm font-medium text-white transition hover:bg-accent/90 focus-within:outline focus-within:outline-2 focus-within:outline-accent">
+            Vælg fil
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              aria-label={`${label}: vælg fil`}
+              onChange={(event) => setSelectedFile(event.target.files?.[0]?.name ?? null)}
+              className="sr-only"
+            />
+          </label>
+          <span className="truncate text-xs text-muted">{selectedFile ?? "Ingen fil valgt"}</span>
+        </div>
       </div>
+      {value && (
+        <label className="block text-xs text-muted">
+          Billedbredde: <output>{value.displayWidthPercent ?? displayWidthPercent}%</output>
+          <input type="range" min={20} max={100} step={5} value={value.displayWidthPercent ?? displayWidthPercent}
+            onChange={(event) => { const width = Number(event.target.value); setDisplayWidthPercent(width); onChange({ ...value, displayWidthPercent: width }); }}
+            className="mt-1 w-full accent-accent" aria-label={`${label}: billedbredde`} />
+        </label>
+      )}
       <div className="flex flex-wrap gap-2">
         <Button size="sm" variant="secondary" onClick={upload} disabled={pending || !altText.trim()}>
           {pending ? "Uploader…" : value ? "Erstat billede" : "Upload billede"}

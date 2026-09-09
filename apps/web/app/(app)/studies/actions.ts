@@ -115,13 +115,16 @@ export async function publishStudy(studyId: string) {
       select coalesce(max(version_number), 0) + 1 as v
       from study_versions
       where study_id = ${studyId} and org_id = ${session.orgId}`;
-    await tx`
+    const [published] = await tx`
       insert into study_versions (org_id, study_id, version_number, definition, metric_definitions, published_by)
       values (${session.orgId}, ${studyId}, ${next.v}, ${tx.json(def as never)},
-              ${tx.json(metricDefs as never)}, ${session.userId})`;
+              ${tx.json(metricDefs as never)}, ${session.userId}) returning id`;
     await tx`
       update studies set status = 'live', updated_at = now()
       where id = ${studyId} and org_id = ${session.orgId}`;
+    await tx`
+      update distributions set study_version_id = ${published.id}
+      where study_id = ${studyId} and org_id = ${session.orgId} and kind = 'public_link'`;
     await audit(tx, {
       orgId: session.orgId, actorUserId: session.userId,
       action: "study.publish", entityType: "study", entityId: studyId,

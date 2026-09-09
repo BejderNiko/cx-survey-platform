@@ -46,6 +46,20 @@ function conditionOperatorFor(question: Question | undefined): Condition["op"] {
   return question?.type === "multiple_choice" ? "contains" : "eq";
 }
 
+function conditionOperators(question: Question | undefined): Condition["op"][] {
+  if (!question) return ["eq"];
+  const numeric = ["nps", "csat", "ces", "rating", "number"].includes(question.type);
+  if (numeric) return ["eq", "ne", "lt", "lte", "gt", "gte", "answered", "not_answered"];
+  if (["single_choice", "multiple_choice", "dropdown", "likert", "ranking", "consent", "preference_test"].includes(question.type)) {
+    return ["eq", "ne", "in", "not_in", "contains", "answered", "not_answered"];
+  }
+  return ["eq", "ne", "answered", "not_answered"];
+}
+
+function conditionOperatorLabel(op: Condition["op"]): string {
+  return ({ eq: "is", ne: "is not", lt: "less than", lte: "at most", gt: "greater than", gte: "at least", in: "is one of", not_in: "is none of", contains: "contains", answered: "is answered", not_answered: "is not answered" })[op];
+}
+
 function answerChoices(question: Question | undefined, locale: Locale): LogicChoice[] {
   if (!question) return [];
   if (["single_choice", "multiple_choice", "dropdown", "ranking"].includes(question.type)) {
@@ -156,6 +170,13 @@ function makeQuestion(type: Question["type"], existing: Question[]): Question {
   };
 }
 
+function cloneQuestion(question: Question, existing: Question[]): Question {
+  const base = `${question.code}_copy`;
+  let code = base;
+  let count = 2;
+  while (existing.some((item) => item.code === code)) code = `${base}_${count++}`;
+  return { ...structuredClone(question), code };
+}
 export function Builder({
   studyId,
   initialTitle,
@@ -260,6 +281,32 @@ export function Builder({
     mutate((draft) => { draft.blocks = draft.blocks.filter((item) => item.id !== blockId); });
   }
 
+  function duplicateQuestion(code: string) {
+    mutate((draft) => {
+      const all = draft.blocks.flatMap((block) => block.questions);
+      const block = draft.blocks.find((item) => item.questions.some((question) => question.code === code));
+      if (!block) return;
+      const index = block.questions.findIndex((question) => question.code === code);
+      if (index < 0) return;
+      block.questions.splice(index + 1, 0, cloneQuestion(block.questions[index], all));
+    });
+  }
+
+  function duplicateBlock(blockId: string) {
+    mutate((draft) => {
+      const index = draft.blocks.findIndex((block) => block.id === blockId);
+      if (index < 0) return;
+      const source = draft.blocks[index];
+      const all = draft.blocks.flatMap((block) => block.questions);
+      const questions: Question[] = [];
+      for (const question of source.questions) {
+        const copy = cloneQuestion(question, [...all, ...questions]);
+        questions.push(copy);
+      }
+      const copy = { ...structuredClone(source), id: nextId("block"), title: { ...(source.title ?? {}), da: `${source.title?.da ?? "Sektion"} (kopi)` }, questions };
+      draft.blocks.splice(index + 1, 0, copy);
+    });
+  }
   function save() {
     if (incompleteLogicCount > 0) {
       setSaveMessage(INCOMPLETE_LOGIC_CONDITION_MESSAGE);
@@ -343,6 +390,7 @@ export function Builder({
             <div className="mx-auto max-w-[1080px] space-y-9">
               {problems.length > 0 && <ValidationNotice problems={problems} />}
               <StudyDetails
+                studyId={studyId}
                 title={studyTitle}
                 definition={definition}
                 onTitleChange={(value) => { setStudyTitle(value); setDirty(true); setSaveMessage(null); }}
@@ -377,7 +425,9 @@ export function Builder({
                   onAddQuestion={(type) => addQuestion(block.id, type)}
                   onMoveQuestion={(index, direction) => moveQuestion(block.id, index, direction)}
                   onRemoveQuestion={removeQuestion}
+                  onDuplicateQuestion={duplicateQuestion}
                   onRemoveSection={() => removeBlock(block.id)}
+                  onDuplicateSection={() => duplicateBlock(block.id)}
                   canRemoveSection={definition.blocks.length > 1}
                 />
               ))}
@@ -516,8 +566,9 @@ function ValidationNotice({ problems }: { problems: string[] }) {
 }
 
 function StudyDetails({
-  title, definition, onTitleChange, mutate,
+  studyId, title, definition, onTitleChange, mutate,
 }: {
+  studyId: string;
   title: string;
   definition: InstrumentDefinition;
   onTitleChange: (value: string) => void;
@@ -539,6 +590,11 @@ function StudyDetails({
             <option value="any">Any device</option><option value="desktop">Desktop</option><option value="mobile">Mobile</option>
           </Select>
         </label>
+        <div className="sm:col-span-2">
+          <StimulusEditor studyId={studyId} kind="context" label="Study context image" value={definition.contextStimulus ?? null}
+            onChange={(asset) => mutate((draft) => { draft.contextStimulus = asset; })}
+            onRemove={() => mutate((draft) => { draft.contextStimulus = undefined; })} />
+        </div>
       </div>
     </section>
   );
@@ -625,6 +681,8 @@ function StudySection({
   onAddQuestion,
   onMoveQuestion,
   onRemoveQuestion,
+  onDuplicateQuestion,
+  onDuplicateSection,
   onRemoveSection,
   canRemoveSection,
 }: {
@@ -641,6 +699,8 @@ function StudySection({
   onAddQuestion: (type: Question["type"]) => void;
   onMoveQuestion: (index: number, direction: -1 | 1) => void;
   onRemoveQuestion: (code: string) => void;
+  onDuplicateQuestion: (code: string) => void;
+  onDuplicateSection: () => void;
   onRemoveSection: () => void;
   canRemoveSection: boolean;
 }) {
@@ -680,6 +740,7 @@ function StudySection({
             <details className="relative">
               <summary className="grid h-9 w-9 cursor-pointer list-none place-items-center rounded-lg text-slate-500 hover:bg-slate-200" aria-label="Section menu"><Icon name="more" /></summary>
               <div className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                <button type="button" onClick={onDuplicateSection} className="w-full rounded-md px-3 py-2 text-left text-xs hover:bg-slate-50">Duplicate section</button>
                 <button type="button" disabled={!canRemoveSection} onClick={onRemoveSection} className="w-full rounded-md px-3 py-2 text-left text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40">Delete section</button>
               </div>
             </details>
@@ -723,6 +784,7 @@ function StudySection({
               onMoveUp={() => onMoveQuestion(questionIndex, -1)}
               onMoveDown={() => onMoveQuestion(questionIndex, 1)}
               onRemove={() => onRemoveQuestion(question.code)}
+              onDuplicate={() => onDuplicateQuestion(question.code)}
               canMoveUp={questionIndex > 0}
               canMoveDown={questionIndex < block.questions.length - 1}
             />
@@ -750,7 +812,7 @@ function StudySection({
 }
 
 function QuestionCard({
-  studyId, question, number, locale, allQuestions, questionNumbers, onChange, onMoveUp, onMoveDown, onRemove, canMoveUp, canMoveDown,
+  studyId, question, number, locale, allQuestions, questionNumbers, onChange, onMoveUp, onMoveDown, onRemove, onDuplicate, canMoveUp, canMoveDown,
 }: {
   studyId: string;
   question: Question;
@@ -762,6 +824,7 @@ function QuestionCard({
   onMoveUp: () => void;
   onMoveDown: () => void;
   onRemove: () => void;
+  onDuplicate: () => void;
   canMoveUp: boolean;
   canMoveDown: boolean;
 }) {
@@ -817,6 +880,7 @@ function QuestionCard({
           onMoveUp={onMoveUp}
           onMoveDown={onMoveDown}
           onRemove={onRemove}
+          onDuplicate={onDuplicate}
           canMoveUp={canMoveUp}
           canMoveDown={canMoveDown}
         />
@@ -840,7 +904,7 @@ function QuestionCard({
         ) : question.type === "prototype_test" ? (
           <PrototypeQuestionBody studyId={studyId} question={question} locale={locale} onChange={onChange} />
         ) : (
-          <QuestionBody question={question} locale={locale} onChange={onChange} />
+          <QuestionBody studyId={studyId} question={question} locale={locale} onChange={onChange} />
         )}
       </div>
     </article>
@@ -849,7 +913,7 @@ function QuestionCard({
 
 function QuestionHeaderToolbar({
   number, required, hidden, hasLogic, logicRuleCount, logicOpen,
-  onRequiredChange, onLogicToggle, onHiddenChange, onMoveUp, onMoveDown, onRemove,
+  onRequiredChange, onLogicToggle, onHiddenChange, onMoveUp, onMoveDown, onRemove, onDuplicate,
   canMoveUp, canMoveDown,
 }: {
   number: string;
@@ -864,6 +928,7 @@ function QuestionHeaderToolbar({
   onMoveUp: () => void;
   onMoveDown: () => void;
   onRemove: () => void;
+  onDuplicate: () => void;
   canMoveUp: boolean;
   canMoveDown: boolean;
 }) {
@@ -896,6 +961,7 @@ function QuestionHeaderToolbar({
         <div className="absolute right-0 z-20 mt-1 w-40 rounded-lg border border-slate-200 bg-white p-1 text-xs shadow-lg">
           <button type="button" disabled={!canMoveUp} onClick={onMoveUp} className="w-full rounded-md px-3 py-2 text-left hover:bg-slate-50 disabled:opacity-40">Move up</button>
           <button type="button" disabled={!canMoveDown} onClick={onMoveDown} className="w-full rounded-md px-3 py-2 text-left hover:bg-slate-50 disabled:opacity-40">Move down</button>
+          <button type="button" onClick={onDuplicate} className="w-full rounded-md px-3 py-2 text-left hover:bg-slate-50">Duplicate question</button>
           <button type="button" onClick={onRemove} className="w-full rounded-md px-3 py-2 text-left text-red-700 hover:bg-red-50">Delete question</button>
         </div>
       </details>
@@ -903,7 +969,7 @@ function QuestionHeaderToolbar({
   );
 }
 
-function QuestionBody({ question, locale, onChange }: { question: Question; locale: Locale; onChange: (patch: Partial<Question>) => void }) {
+function QuestionBody({ studyId, question, locale, onChange }: { studyId: string; question: Question; locale: Locale; onChange: (patch: Partial<Question>) => void }) {
   const meta = QUESTION_META[question.type];
   const [helpTextOpen, setHelpTextOpen] = useState(() => Object.values(question.helpText ?? {}).some((value) => Boolean(value?.trim())));
   return (
@@ -913,6 +979,9 @@ function QuestionBody({ question, locale, onChange }: { question: Question; loca
         <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-800">Help text</p><p className="mt-0.5 text-[11px] text-slate-500">Show an optional explanation below the question.</p></div><Toggle checked={helpTextOpen} onChange={setHelpTextOpen} aria-label="Enable help text" /></div>
         {helpTextOpen && <div className="mt-3"><LocalizedField label="Help text" locale={locale} value={question.helpText ?? {}} onChange={(helpText) => onChange({ helpText })} placeholder="Optional explanation shown below the question" /></div>}
       </div>
+      <StimulusEditor studyId={studyId} kind="context" label="Question image" value={question.stimuli?.[0] ?? null}
+        onChange={(asset) => onChange({ stimuli: [asset] })}
+        onRemove={question.stimuli?.length ? () => onChange({ stimuli: undefined }) : undefined} />
       {needsOptions(question.type) && <OptionsEditor question={question} locale={locale} onChange={onChange} />}
       {question.type === "rating" && <ScaleEditor question={question} locale={locale} onChange={onChange} />}
       {question.type === "matrix" && <MatrixEditor question={question} locale={locale} onChange={onChange} />}
@@ -1202,7 +1271,7 @@ function DisplayLogicEditor({
       <div>
         {conditions.map((condition, index) => {
           const target = candidates.find((candidate) => candidate.code === condition.questionCode);
-          const operator = conditionOperatorFor(target);
+          const operator = condition.op;
           return (
             <div key={index}>
               {index > 0 && (
@@ -1251,14 +1320,16 @@ function DisplayLogicEditor({
                     </option>
                   ))}
                 </Select>
-                <span className="font-medium text-slate-700">answer {operator === "contains" ? "contains" : "is"}</span>
+                <Select aria-label="Comparison operator" value={operator} onChange={(event) => { const next = structuredClone(conditions); const op = event.target.value as Condition["op"]; next[index].op = op; next[index].value = op === "answered" || op === "not_answered" ? undefined : ""; onChange(next); }} className="h-9 min-w-32 text-xs">
+                  {conditionOperators(target).map((op) => <option key={op} value={op}>{conditionOperatorLabel(op)}</option>)}
+                </Select>
                 <AnswerValueControl
                   target={target}
+                  op={operator}
                   locale={locale}
                   value={condition.value}
                   onChange={(value) => {
                     const next = structuredClone(conditions);
-                    next[index].op = operator;
                     next[index].value = value;
                     onChange(next);
                   }}
@@ -1301,15 +1372,17 @@ function DisplayLogicEditor({
 }
 
 function AnswerValueControl({
-  target, locale, value, onChange,
+  target, op, locale, value, onChange,
 }: {
   target: Question | undefined;
+  op: Condition["op"];
   locale: Locale;
   value: unknown;
   onChange: (value: unknown) => void;
 }) {
+  if (op === "answered" || op === "not_answered") return null;
   const choices = answerChoices(target, locale);
-  if (target?.type === "multiple_choice" && choices.length > 0) {
+  if ((target?.type === "multiple_choice" || op === "in" || op === "not_in") && choices.length > 0) {
     return <MultipleAnswerChoice value={value} choices={choices} onChange={onChange} />;
   }
   if (choices.length > 0) {
