@@ -119,14 +119,14 @@ async function completedCount(page: import("@playwright/test").Page, resultsPath
     .filter({ hasText: /gennemførte/i })
     .first();
 
-  const text = await tile.innerText();
-  const match = text.match(/\b\d+\s*\/\s*(\d+)\s+gennemførte\b/i);
+  const hint = await tile.locator(":scope > div").last().innerText();
+  const match = hint.match(/^(\d+)\s*\/\s*(\d+)\s+gennemførte$/i);
 
   if (!match) {
-    throw new Error(`Kunne ikke finde gennemførte antal i KPI-kort: ${text}`);
+    throw new Error(`Kunne ikke finde gennemførte antal i KPI-hint: ${hint}`);
   }
 
-  return Number(match[1]);
+  return Number(match[2]);
 }
 
 test.describe("analyse", () => {
