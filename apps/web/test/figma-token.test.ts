@@ -16,7 +16,10 @@ describe("Figma token envelope", () => {
 
   it("rejects tampering and a different encryption secret", () => {
     const envelope = sealFigmaToken(identity, "figma-secret-token", 300, secret, 1_000);
-    const tampered = `${envelope.slice(0, -1)}${envelope.endsWith("A") ? "B" : "A"}`;
+    const parts = envelope.split(".");
+    const tag = parts[2]!;
+    parts[2] = `${tag.startsWith("A") ? "B" : "A"}${tag.slice(1)}`;
+    const tampered = parts.join(".");
     expect(openFigmaToken(tampered, identity, secret, 2_000)).toBeNull();
     expect(openFigmaToken(envelope, identity, `${secret}-wrong`, 2_000)).toBeNull();
   });
