@@ -113,12 +113,20 @@ test.describe("besvarelse og resultater", () => {
 
 async function completedCount(page: import("@playwright/test").Page, resultsPath: string): Promise<number> {
   await page.goto(resultsPath);
+
   const tile = page
-    .locator("div", { hasText: /^Gennemførte$/ })
-    .locator("xpath=following-sibling::div[1]")
+    .locator("div.rounded-xl")
+    .filter({ hasText: /gennemførte/i })
     .first();
+
   const text = await tile.innerText();
-  return Number(text.trim());
+  const match = text.match(/\b\d+\s*\/\s*(\d+)\s+gennemførte\b/i);
+
+  if (!match) {
+    throw new Error(`Kunne ikke finde gennemførte antal i KPI-kort: ${text}`);
+  }
+
+  return Number(match[1]);
 }
 
 test.describe("analyse", () => {
