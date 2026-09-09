@@ -469,8 +469,8 @@ function QuestionEditor({
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
-              checked={question.randomizeStimuli ?? false}
-              onChange={(event) => onChange({ randomizeStimuli: event.target.checked })}
+              checked={question.type === "preference_test" ? (question.randomizeStimuli ?? false) : false}
+              onChange={(event) => question.type === "preference_test" ? onChange({ randomizeStimuli: event.target.checked }) : undefined}
             />
             Bland billedernes rækkefølge for hver respondent
           </label>

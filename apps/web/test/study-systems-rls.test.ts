@@ -13,12 +13,12 @@ describe("study-systems RLS metadata", () => {
     const tables = ["feature_requests", "feature_request_events", "report_jobs", "prototype_path_labels"];
     const forced = await admin`
       select relname from pg_class
-      where relname = any(${admin.array(tables)}::text[]) and relrowsecurity and relforcerowsecurity`;
+      where relname in ('feature_requests', 'feature_request_events', 'report_jobs', 'prototype_path_labels') and relrowsecurity and relforcerowsecurity`;
     expect(forced.map((row) => String(row.relname)).sort()).toEqual([...tables].sort());
 
     const policies = await admin`
       select tablename, cmd from pg_policies
-      where schemaname = 'public' and tablename = any(${admin.array(tables)}::text[])`;
+      where schemaname = 'public' and tablename in ('feature_requests', 'feature_request_events', 'report_jobs', 'prototype_path_labels')`;
     const commands = (table: string) => policies.filter((row) => row.tablename === table).map((row) => String(row.cmd)).sort();
     expect(commands("feature_request_events")).toEqual(["INSERT", "SELECT"]);
     expect(commands("report_jobs")).toEqual(["INSERT", "SELECT"]);

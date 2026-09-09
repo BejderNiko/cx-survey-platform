@@ -90,7 +90,7 @@ create table prototype_path_labels (
   unique (org_id, id)
 );
 create unique index prototype_path_labels_signature_idx on prototype_path_labels
-  (org_id, study_version_id, question_code, (encode(sha256(convert_to(path_signature, 'UTF8')), 'hex')));
+  (org_id, study_version_id, question_code, md5(path_signature));
 
 alter table feature_requests enable row level security;
 alter table feature_requests force row level security;

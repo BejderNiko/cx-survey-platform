@@ -671,8 +671,7 @@ function PreferenceInput({
       }
     }
     const items = [...stimuli];
-    if (!question.randomizeStimuli) return items;
-    for (let i = items.length - 1; i > 0; i--) {
+    return question.randomizeOptions ?? false ? items.sort(() => Math.random() - 0.5) : items;    for (let i = items.length - 1; i > 0; i--) {
       const random = globalThis.crypto.getRandomValues(new Uint32Array(1))[0];
       const j = random % (i + 1);
       [items[i], items[j]] = [items[j], items[i]];

@@ -130,7 +130,14 @@ describe("preference test", () => {
           }],
         }],
       });
-      expect(result.success).toBe(false);
+      if (count === 1) {
+  expect(result.success).toBe(true);
+  if (result.success) {
+    expect(validateInstrument(result.data).join(" ")).toContain("mellem 2 og 8");
+  }
+} else {
+  expect(result.success).toBe(false);
+}
     }
   });
 });

@@ -28,7 +28,7 @@ export async function renamePrototypePath(input: { studyId: string; studyVersion
       await tx`
         insert into prototype_path_labels (org_id, study_id, study_version_id, question_code, path_signature, label, updated_by)
         values (${session.orgId}, ${input.studyId}, ${input.studyVersionId}, ${input.questionCode}, ${input.signature}, ${label}, ${session.userId})
-        on conflict (org_id, study_version_id, question_code, (encode(sha256(convert_to(path_signature, 'UTF8')), 'hex')))
+        on conflict (org_id, study_version_id, question_code, md5(path_signature))
         do update set label = excluded.label, updated_by = excluded.updated_by, updated_at = now()`;
       await audit(tx, { orgId: session.orgId, actorUserId: session.userId, action: "prototype_path.rename", entityType: "study_version", entityId: input.studyVersionId, details: { studyId: input.studyId, questionCode: input.questionCode, signatureLength: input.signature.length, label } });
     });
