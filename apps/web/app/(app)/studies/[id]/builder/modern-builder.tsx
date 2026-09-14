@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useTransition, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import {
   INCOMPLETE_LOGIC_CONDITION_MESSAGE,
-  QUESTION_TYPES,
+  AUTHORING_QUESTION_TYPES,
   isIncompleteLogicCondition,
   lt,
   validateInstrument,
@@ -19,6 +19,7 @@ import { SurveyRenderer } from "@/components/survey/renderer";
 import { updateDraft } from "../../actions";
 import { FigmaFramePicker } from "./figma-frame-picker";
 import { StimulusEditor } from "./stimulus-editor";
+import { CommentsPanel, type StudyCommentRow } from "../comments-panel";
 
 const OPTION_TYPES = ["single_choice", "multiple_choice", "dropdown", "likert", "ranking"];
 
@@ -135,7 +136,7 @@ function makeQuestion(type: Question["type"], existing: Question[]): Question {
     code,
     type,
     label: { da: "", en: "" },
-    required: false,
+    required: type === "preference_test",
     ...(needsOptions(type) ? {
       options: [
         { id: nextId("opt"), label: { da: "Mulighed 1", en: "Option 1" }, ...(type === "likert" ? { value: 1 } : {}) },
@@ -182,11 +183,15 @@ export function Builder({
   initialTitle,
   initialDefinition,
   previewUrl,
+  initialComments,
+  canResolveComments,
 }: {
   studyId: string;
   initialTitle: string;
   initialDefinition: InstrumentDefinition;
   previewUrl: string;
+  initialComments: StudyCommentRow[];
+  canResolveComments: boolean;
 }) {
   const [definition, setDefinition] = useState(initialDefinition);
   const [studyTitle, setStudyTitle] = useState(initialTitle);
@@ -340,7 +345,7 @@ export function Builder({
         <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
           <span className="hidden sm:inline">Participant device</span>
           <Select
-            aria-label="Deltagerenhed"
+            aria-label="Participant device"
             value={definition.participantDevice}
             onChange={(event) => mutate((draft) => { draft.participantDevice = event.target.value as InstrumentDefinition["participantDevice"]; })}
             className="h-9 min-w-28 border-slate-200 bg-white text-xs"
@@ -411,6 +416,8 @@ export function Builder({
                   key={block.id}
                   studyId={studyId}
                   block={block}
+                  comments={initialComments}
+                  canResolveComments={canResolveComments}
                   blockIndex={blockIndex}
                   locale={editingLocale}
                   allQuestions={questions}
@@ -518,8 +525,8 @@ function SidebarLink({
       <span className={cn("grid h-5 w-5 shrink-0 place-items-center rounded", tones[tone])}><Icon name={icon} size={12} /></span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {hidden
-        ? <span className="rounded bg-slate-700 px-1.5 py-0.5 text-[9px] font-bold text-white">skjult</span>
-        : hiddenCount > 0 && <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold text-slate-600">{hiddenCount} skjult</span>}
+        ? <span className="rounded bg-slate-700 px-1.5 py-0.5 text-[9px] font-bold text-white">hidden</span>
+        : hiddenCount > 0 && <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold text-slate-600">{hiddenCount} hidden</span>}
       {drag && <Icon name="grip" size={13} className="text-slate-400 opacity-0 group-hover:opacity-100" />}
     </a>
   );
@@ -667,9 +674,75 @@ function SectionHeading({ icon, children, actions }: { icon: IconName; children:
   );
 }
 
+function commentCount(comments: StudyCommentRow[], questionCode?: string, sectionId?: string): number {
+  if (questionCode !== undefined) return comments.filter((comment) => comment.question_code === questionCode).length;
+  if (sectionId !== undefined) return comments.filter((comment) => comment.section_id === sectionId).length;
+  return comments.length;
+}
+
+function CommentPopover({
+  studyId,
+  comments,
+  canResolve,
+  label,
+  questionCode,
+  sectionId,
+}: {
+  studyId: string;
+  comments: StudyCommentRow[];
+  canResolve: boolean;
+  label: string;
+  questionCode?: string;
+  sectionId?: string;
+}) {
+  const count = commentCount(comments, questionCode, sectionId);
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const closeWhenOutside = (event: PointerEvent) => {
+      if (detailsRef.current?.open && event.target instanceof Node && !detailsRef.current.contains(event.target)) {
+        detailsRef.current.open = false;
+      }
+    };
+    document.addEventListener("pointerdown", closeWhenOutside);
+    return () => document.removeEventListener("pointerdown", closeWhenOutside);
+  }, []);
+  return (
+    <details ref={detailsRef} className="relative">
+      <summary className="flex h-9 cursor-pointer list-none items-center rounded-md bg-slate-100 px-2 text-xs font-medium text-slate-700 hover:bg-slate-200" aria-label={label}>
+        Comment{count > 0 ? " · " + count : ""}
+      </summary>
+      <div className="absolute right-0 top-10 z-50 w-[min(440px,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
+        <CommentsPanel
+          studyId={studyId}
+          comments={comments}
+          questionCode={questionCode}
+          sectionId={sectionId}
+          canResolve={canResolve}
+        />
+      </div>
+    </details>
+  );
+}
+function EmptySectionQuestionGuide({ onAdd }: { onAdd: (type: Question["type"]) => void }) {
+  const icons: Record<string, string> = { nps: "⭐", single_choice: "🔘", multiple_choice: "☑️", short_text: "✍️", long_text: "📝", number: "🔢", rating: "⭐", likert: "📊", ranking: "🏆", first_click: "🎯", preference_test: "🖼️", prototype_test: "🧭" };
+  return (
+    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5">
+      <div className="text-center"><span className="text-2xl" aria-hidden>🧩</span><p className="mt-2 text-sm font-semibold">Choose a question type</p><p className="mt-1 text-xs text-slate-500">Each method has a clear use. Click one to add it.</p></div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {AUTHORING_QUESTION_TYPES.map((type) => {
+          const meta = QUESTION_META[type];
+          return <button key={type} type="button" onClick={() => onAdd(type)} className="rounded-lg border border-slate-200 bg-white p-3 text-left transition hover:border-accent hover:shadow-sm"><span className="text-lg" aria-hidden>{icons[type] ?? "✨"}</span><span className="ml-2 text-sm font-semibold text-slate-900">{meta.label}</span><span className="mt-1 block text-[11px] leading-4 text-slate-500">{meta.hint}</span></button>;
+        })}
+      </div>
+    </div>
+  );
+}
+
 function StudySection({
   studyId,
   block,
+  comments,
+  canResolveComments,
   blockIndex,
   locale,
   allQuestions,
@@ -688,6 +761,8 @@ function StudySection({
 }: {
   studyId: string;
   block: InstrumentDefinition["blocks"][number];
+  comments: StudyCommentRow[];
+  canResolveComments: boolean;
   blockIndex: number;
   locale: Locale;
   allQuestions: Question[];
@@ -717,6 +792,7 @@ function StudySection({
         icon={hasDesign ? "image" : "question"}
         actions={
           <div className="flex items-center gap-2">
+            <CommentPopover studyId={studyId} comments={comments} canResolve={canResolveComments} label="Comment on section" sectionId={block.id} />
             <button
               type="button"
               onClick={() => {
@@ -780,6 +856,8 @@ function StudySection({
               locale={locale}
               allQuestions={allQuestions}
               questionNumbers={questionNumbers}
+              comments={comments}
+              canResolveComments={canResolveComments}
               onChange={(patch) => onQuestionChange(question.code, patch)}
               onMoveUp={() => onMoveQuestion(questionIndex, -1)}
               onMoveDown={() => onMoveQuestion(questionIndex, 1)}
@@ -789,17 +867,11 @@ function StudySection({
               canMoveDown={questionIndex < block.questions.length - 1}
             />
           ))}
-          {block.questions.length === 0 && (
-            <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center">
-              <span className="mx-auto grid h-10 w-10 place-items-center rounded-xl bg-white text-slate-500 shadow-sm"><Icon name="question" /></span>
-              <p className="mt-3 text-sm font-semibold">No questions in this section</p>
-              <p className="mt-1 text-xs text-slate-500">Choose a question type below.</p>
-            </div>
-          )}
+          {block.questions.length === 0 && <EmptySectionQuestionGuide onAdd={onAddQuestion} />}
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <Select aria-label={`Question type for section ${blockIndex + 1}`} value={newType} onChange={(event) => setNewType(event.target.value as Question["type"])}>
-            {QUESTION_TYPES.map((type) => <option key={type} value={type}>{QUESTION_META[type].label}</option>)}
+            {AUTHORING_QUESTION_TYPES.map((type) => <option key={type} value={type}>{QUESTION_META[type].label}</option>)}
           </Select>
           <Button size="sm" onClick={() => onAddQuestion(newType)}><Icon name="plus" /> Add another question</Button>
           <label className="ml-1 inline-flex items-center gap-2 text-xs text-slate-600">
@@ -812,7 +884,7 @@ function StudySection({
 }
 
 function QuestionCard({
-  studyId, question, number, locale, allQuestions, questionNumbers, onChange, onMoveUp, onMoveDown, onRemove, onDuplicate, canMoveUp, canMoveDown,
+  studyId, question, number, locale, allQuestions, questionNumbers, comments, canResolveComments, onChange, onMoveUp, onMoveDown, onRemove, onDuplicate, canMoveUp, canMoveDown,
 }: {
   studyId: string;
   question: Question;
@@ -820,6 +892,8 @@ function QuestionCard({
   locale: Locale;
   allQuestions: Question[];
   questionNumbers: ReadonlyMap<string, string>;
+  comments: StudyCommentRow[];
+  canResolveComments: boolean;
   onChange: (patch: Partial<Question>) => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
@@ -857,8 +931,9 @@ function QuestionCard({
           }}
           className="h-9 border-0 bg-slate-50 py-0 text-xs font-medium"
         >
-          {QUESTION_TYPES.map((type) => <option key={type} value={type}>{QUESTION_META[type].label}</option>)}
+          {AUTHORING_QUESTION_TYPES.map((type) => <option key={type} value={type}>{QUESTION_META[type].label}</option>)}
         </Select>
+        <CommentPopover studyId={studyId} comments={comments} canResolve={canResolveComments} label={"Comment on question " + question.code} questionCode={question.code} />
         <QuestionHeaderToolbar
           number={number}
           required={question.required}
@@ -901,6 +976,8 @@ function QuestionCard({
       <div className="mt-4">
         {question.type === "first_click" ? (
           <DesignQuestionBody studyId={studyId} question={question} locale={locale} onChange={onChange} />
+        ) : question.type === "preference_test" ? (
+          <PreferenceQuestionBody studyId={studyId} question={question} locale={locale} onChange={onChange} />
         ) : question.type === "prototype_test" ? (
           <PrototypeQuestionBody studyId={studyId} question={question} locale={locale} onChange={onChange} />
         ) : (
@@ -972,6 +1049,7 @@ function QuestionHeaderToolbar({
 function QuestionBody({ studyId, question, locale, onChange }: { studyId: string; question: Question; locale: Locale; onChange: (patch: Partial<Question>) => void }) {
   const meta = QUESTION_META[question.type];
   const [helpTextOpen, setHelpTextOpen] = useState(() => Object.values(question.helpText ?? {}).some((value) => Boolean(value?.trim())));
+  const [imageAttachmentOpen, setImageAttachmentOpen] = useState(() => Boolean(question.stimuli?.[0]));
   return (
     <div className="space-y-4">
       <LocalizedField label="Question" hint={meta.hint} locale={locale} value={question.label} onChange={(label) => onChange({ label })} textarea={question.type === "long_text"} />
@@ -979,9 +1057,12 @@ function QuestionBody({ studyId, question, locale, onChange }: { studyId: string
         <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-800">Help text</p><p className="mt-0.5 text-[11px] text-slate-500">Show an optional explanation below the question.</p></div><Toggle checked={helpTextOpen} onChange={setHelpTextOpen} aria-label="Enable help text" /></div>
         {helpTextOpen && <div className="mt-3"><LocalizedField label="Help text" locale={locale} value={question.helpText ?? {}} onChange={(helpText) => onChange({ helpText })} placeholder="Optional explanation shown below the question" /></div>}
       </div>
-      <StimulusEditor studyId={studyId} kind="context" label="Question image" value={question.stimuli?.[0] ?? null}
-        onChange={(asset) => onChange({ stimuli: [asset] })}
-        onRemove={question.stimuli?.length ? () => onChange({ stimuli: undefined }) : undefined} />
+      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+        <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-800">Question image</p><p className="mt-0.5 text-[11px] text-slate-500">Optional image shown with question.</p></div><Toggle checked={imageAttachmentOpen} onChange={(open) => { setImageAttachmentOpen(open); if (!open) onChange({ stimuli: undefined }); }} aria-label="Enable question image" /></div>
+        {imageAttachmentOpen && <div className="mt-3"><StimulusEditor studyId={studyId} kind="context" label="Question image" value={question.stimuli?.[0] ?? null}
+          onChange={(asset) => onChange({ stimuli: [asset] })}
+          onRemove={question.stimuli?.length ? () => onChange({ stimuli: undefined }) : undefined} /></div>}
+      </div>
       {needsOptions(question.type) && <OptionsEditor question={question} locale={locale} onChange={onChange} />}
       {question.type === "rating" && <ScaleEditor question={question} locale={locale} onChange={onChange} />}
       {question.type === "matrix" && <MatrixEditor question={question} locale={locale} onChange={onChange} />}
@@ -989,6 +1070,58 @@ function QuestionBody({ studyId, question, locale, onChange }: { studyId: string
   );
 }
 
+function PreferenceQuestionBody({
+  studyId, question, locale, onChange,
+}: {
+  studyId: string;
+  question: Question;
+  locale: Locale;
+  onChange: (patch: Partial<Question>) => void;
+}) {
+  const stimuli = question.stimuli ?? [];
+  const replaceStimulus = (index: number, asset: NonNullable<Question["stimulus"]>) => {
+    const next = [...stimuli];
+    next[index] = asset;
+    onChange({ stimuli: next });
+  };
+  const removeStimulus = (index: number) => {
+    const next = stimuli.filter((_, itemIndex) => itemIndex !== index);
+    onChange({ stimuli: next.length > 0 ? next : undefined });
+  };
+  return (
+    <div className="space-y-4">
+      <LocalizedField label="Question" hint={QUESTION_META.preference_test.hint} locale={locale} value={question.label} onChange={(label) => onChange({ label })} />
+      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+        <p className="text-xs font-semibold text-slate-800">Preference images</p>
+        <p className="mt-0.5 text-[11px] text-slate-500">Attach 2–8 images. Participants choose one preferred design.</p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {stimuli.map((stimulus, index) => (
+          <StimulusEditor
+            key={stimulus.id}
+            studyId={studyId}
+            kind="preference"
+            optionalVisibility={false}
+            label={`Design ${index + 1}`}
+            value={stimulus}
+            onChange={(asset) => replaceStimulus(index, asset)}
+            onRemove={() => removeStimulus(index)}
+          />
+        ))}
+        {stimuli.length < 8 && (
+          <StimulusEditor
+            studyId={studyId}
+            kind="preference"
+            optionalVisibility={false}
+            label={`Attach design ${stimuli.length + 1}`}
+            value={null}
+            onChange={(asset) => onChange({ stimuli: [...stimuli, asset] })}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
 function DesignQuestionBody({
   studyId, question, locale, onChange,
 }: {
@@ -1011,14 +1144,14 @@ function DesignQuestionBody({
     <div className="space-y-4">
       <div className="rounded-xl bg-[#f2f8fb] p-4">
         <p className="text-sm font-semibold">Designs</p>
-        <p className="mt-1 text-xs text-slate-500">{"Vedh\u00e6ft 1-8 billeder fra din enhed. Hvert klik gemmes sammen med det valgte design."}</p>
+        <p className="mt-1 text-xs text-slate-500">{"Attach 1-8 images from your device. Each click is stored with the selected design."}</p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         {stimuli.map((stimulus, index) => (
           <StimulusEditor
             key={stimulus.id}
             studyId={studyId}
-            kind="first_click"
+            kind="first_click" optionalVisibility={false}
             label={`Design ${index + 1}`}
             value={stimulus}
             onChange={(asset) => replaceStimulus(index, asset)}
@@ -1028,15 +1161,15 @@ function DesignQuestionBody({
         {stimuli.length < 8 && (
           <StimulusEditor
             studyId={studyId}
-            kind="first_click"
-            label={`Vedh\u00e6ft design ${stimuli.length + 1}`}
+            kind="first_click" optionalVisibility={false}
+            label={"Attach design " + (stimuli.length + 1)}
             value={null}
             onChange={(asset) => onChange({ stimuli: [...stimuli, asset], stimulus: undefined, imageUrl: undefined })}
           />
         )}
       </div>
       {question.imageUrl && stimuli.length === 0 && (
-        <p className="text-xs text-slate-500">{"Et \u00e6ldre billedlink findes i kladden. Vedh\u00e6ft et nyt billede for at erstatte det."}</p>
+        <p className="text-xs text-slate-500">{"An older image link exists in the draft. Attach a new image to replace it."}</p>
       )}
       <LocalizedField label="Task instruction" hint="Tell participants what to find or do in the design." locale={locale} value={question.taskText ?? {}} onChange={(taskText) => onChange({ taskText })} />
       <LocalizedField label="Question" locale={locale} value={question.label} onChange={(label) => onChange({ label })} placeholder="Optional follow-up label" />
@@ -1069,7 +1202,7 @@ function PrototypeQuestionBody({
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-4 text-sm text-cyan-950">
-        Indsæt prototype-link. Gem kladden. Forbind Figma. Vælg derefter start- og målskærm direkte i den levende prototype.
+        Paste a prototype link, save the draft, connect Figma, then choose start and goal screens in the live prototype.
       </div>
       <LocalizedField
         label="Task instruction"
@@ -1082,11 +1215,11 @@ function PrototypeQuestionBody({
       <div className="grid gap-3 sm:grid-cols-2">
         <button type="button" onClick={() => patchConfig({ flowType: "task", showSuccessScreen: true })} className={`rounded-xl border p-4 text-left ${config.flowType === "task" ? "border-cyan-600 bg-cyan-50" : "border-line bg-white"}`}>
           <span className="text-sm font-semibold text-slate-950">Task flow</span>
-          <span className="mt-1 block text-xs text-slate-600">Deltageren skal nå en valgt målskærm.</span>
+          <span className="mt-1 block text-xs text-slate-600">Participants must reach the selected goal screen.</span>
         </button>
         <button type="button" onClick={() => patchConfig({ flowType: "free", goalFrameId: undefined, goalFrameName: undefined, showSuccessScreen: false })} className={`rounded-xl border p-4 text-left ${config.flowType === "free" ? "border-cyan-600 bg-cyan-50" : "border-line bg-white"}`}>
           <span className="text-sm font-semibold text-slate-950">Free flow</span>
-          <span className="mt-1 block text-xs text-slate-600">Deltageren udforsker uden en målskærm.</span>
+          <span className="mt-1 block text-xs text-slate-600">Participants explore without a goal screen.</span>
         </button>
       </div>
       <FigmaFramePicker studyId={studyId} questionCode={question.code} config={config} onPatch={patchConfig} />
@@ -1202,6 +1335,12 @@ function OptionsEditor({ question, locale, onChange }: { question: Question; loc
           Randomize order of choices
         </label>
       </div>
+      {question.type === "multiple_choice" && (
+        <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+          <label className="flex items-center gap-2 text-xs font-semibold text-slate-700"><input type="checkbox" checked={question.multipleSelectLimit !== undefined} onChange={(event) => onChange({ multipleSelectLimit: event.target.checked ? Math.min(3, Math.max(1, options.length)) : undefined })} /> Limit number of selections</label>
+          {question.multipleSelectLimit !== undefined && <div className="mt-2 flex items-center gap-2"><Input type="number" min={1} max={Math.max(1, options.length)} value={question.multipleSelectLimit} onChange={(event) => onChange({ multipleSelectLimit: Math.min(Math.max(1, Number(event.target.value) || 1), Math.max(1, options.length)) })} className="h-9 w-24" /><span className="text-[11px] text-slate-500">Participants can choose up to this many.</span></div>}
+        </div>
+      )}
     </div>
   );
 }
@@ -1278,8 +1417,8 @@ function DisplayLogicEditor({
                 <div className="flex items-center gap-3 py-2.5" role="group" aria-label={`Combine condition ${index} and ${index + 1}`}>
                   <span className="h-px flex-1 bg-cyan-200" aria-hidden />
                   <div className="inline-flex rounded-lg border border-cyan-200 bg-white p-0.5">
-                    <button type="button" onClick={() => onModeChange("all")} className={cn("rounded-md px-3 py-1.5 text-xs font-semibold", mode === "all" ? "bg-cyan-700 text-white" : "text-slate-600 hover:bg-cyan-50")}>Og</button>
-                    <button type="button" onClick={() => onModeChange("any")} className={cn("rounded-md px-3 py-1.5 text-xs font-semibold", mode === "any" ? "bg-cyan-700 text-white" : "text-slate-600 hover:bg-cyan-50")}>Eller</button>
+                    <button type="button" onClick={() => onModeChange("all")} className={cn("rounded-md px-3 py-1.5 text-xs font-semibold", mode === "all" ? "bg-cyan-700 text-white" : "text-slate-600 hover:bg-cyan-50")}>AND</button>
+                    <button type="button" onClick={() => onModeChange("any")} className={cn("rounded-md px-3 py-1.5 text-xs font-semibold", mode === "any" ? "bg-cyan-700 text-white" : "text-slate-600 hover:bg-cyan-50")}>OR</button>
                   </div>
                   <span className="h-px flex-1 bg-cyan-200" aria-hidden />
                 </div>

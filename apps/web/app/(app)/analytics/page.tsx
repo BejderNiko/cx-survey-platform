@@ -7,7 +7,7 @@ import { getAnalyticsOverview } from "@/lib/data/analytics";
 import { withUser } from "@/lib/db";
 import { fmtDateTime } from "@/lib/format";
 import { RUN_STATUS, label } from "@/lib/labels";
-import { BuildDatasetButton } from "./build-dataset-button";
+import { RWorkbench } from "./r-workbench";
 
 export default async function AnalyticsPage() {
   const session = await requireSession();
@@ -33,15 +33,16 @@ export default async function AnalyticsPage() {
         actions={canCreate ? <LinkButton href="/analytics/import" variant="primary">Importér rådata</LinkButton> : undefined}
       />
 
-      {canCreate && (
-        <Card title="Byg datasæt fra studiebesvarelser">
-          <BuildDatasetButton studies={data.studies.map((s) => ({ id: s.id as string, title: s.title as string }))} />
-          <p className="mt-2 text-xs text-muted">
-            Bygger et versioneret, analyseklart datasæt fra gennemførte besvarelser. Rådata ændres aldrig;
-            genopbygning opretter en ny datasætversion med registreret afstamning.
-          </p>
-        </Card>
-      )}
+      <RWorkbench
+        canRun={can(session.role, "analytics.run")}
+        datasets={data.datasets.map((dataset) => ({
+          id: String(dataset.id),
+          name: String(dataset.name),
+          versionId: dataset.latest_version_id ? String(dataset.latest_version_id) : null,
+          versionNumber: dataset.latest_version === null || dataset.latest_version === undefined ? null : Number(dataset.latest_version),
+          rowCount: dataset.row_count === null || dataset.row_count === undefined ? null : Number(dataset.row_count),
+        }))}
+      />
 
       <Card title="Datasætregister">
         <Table>
@@ -71,7 +72,7 @@ export default async function AnalyticsPage() {
               </tr>
             ))}
             {data.datasets.length === 0 && (
-              <tr><Td colSpan={7} className="text-muted">Ingen datasæt endnu — byg ét fra et studie ovenfor.</Td></tr>
+              <tr><Td colSpan={7} className="text-muted">No datasets yet — import raw data to create one.</Td></tr>
             )}
           </tbody>
         </Table>

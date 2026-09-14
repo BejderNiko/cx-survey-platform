@@ -239,6 +239,9 @@ function validateAnswerValue(question: Question, value: unknown): string | null 
       if (selected.length > allowed.size || new Set(selected).size !== selected.length) {
         return "contains duplicate or too many options.";
       }
+      if (question.multipleSelectLimit !== undefined && selected.length > question.multipleSelectLimit) {
+        return "select limit cannot be exceeded: choose at most " + question.multipleSelectLimit + ".";
+      }
       return selected.every((id) => allowed.has(id)) ? null : "contains an unknown option.";
     }
     case "ranking": {

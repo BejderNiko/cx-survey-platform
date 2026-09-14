@@ -5,7 +5,19 @@ import { assertHostedRuntimeConfiguration } from "@/lib/env";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-async function databaseReady(): Promise<boolean> {
+type DatabaseReadiness = {
+  ready: boolean;
+  studiesReady: boolean;
+  complete: boolean;
+  commentsThreading: boolean;
+  sectionComments: boolean;
+  mediaAssets: boolean;
+  recruitmentPages: boolean;
+  importLifecycle: boolean;
+  importCommitting: boolean;
+};
+
+async function databaseReadiness(): Promise<DatabaseReadiness> {
   try {
     const [schema] = await appSql`
       select
@@ -18,6 +30,13 @@ async function databaseReady(): Promise<boolean> {
             and table_name = 'comments'
             and column_name in ('study_id', 'question_code', 'parent_id', 'status', 'resolved_by', 'resolved_at')
         ) as comments_threading,
+        (
+          select count(*) = 7
+          from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'comments'
+            and column_name in ('study_id', 'question_code', 'section_id', 'parent_id', 'status', 'resolved_by', 'resolved_at')
+        ) as section_comments,
         (
           select count(*) = 3
           from information_schema.columns
@@ -32,15 +51,38 @@ async function databaseReady(): Promise<boolean> {
           where t.typname = 'import_status' and e.enumlabel = 'committing'
         ) as import_committing_status
     `;
-    return Boolean(
-      schema?.media_assets &&
-      schema?.recruitment_pages &&
-      schema?.comments_threading &&
-      schema?.import_lifecycle &&
-      schema?.import_committing_status,
-    );
+    const mediaAssets = Boolean(schema?.media_assets);
+    const recruitmentPages = Boolean(schema?.recruitment_pages);
+    const commentsThreading = Boolean(schema?.comments_threading);
+    const sectionComments = Boolean(schema?.section_comments);
+    const importLifecycle = Boolean(schema?.import_lifecycle);
+    const importCommitting = Boolean(schema?.import_committing_status);
+    const studiesReady = Boolean(mediaAssets && commentsThreading);
+    const ready = Boolean(studiesReady && importLifecycle && importCommitting);
+    const complete = Boolean(ready && sectionComments && recruitmentPages);
+    return {
+      ready,
+      studiesReady,
+      complete,
+      commentsThreading,
+      sectionComments,
+      mediaAssets,
+      recruitmentPages,
+      importLifecycle,
+      importCommitting,
+    };
   } catch {
-    return false;
+    return {
+      ready: false,
+      studiesReady: false,
+      complete: false,
+      commentsThreading: false,
+      sectionComments: false,
+      mediaAssets: false,
+      recruitmentPages: false,
+      importLifecycle: false,
+      importCommitting: false,
+    };
   }
 }
 
@@ -51,7 +93,17 @@ export async function GET() {
     return Response.json(
       {
         status: "not_ready",
-        database: { ready: false },
+        database: {
+          ready: false,
+          studiesReady: false,
+          complete: false,
+          commentsThreading: false,
+          sectionComments: false,
+          mediaAssets: false,
+          recruitmentPages: false,
+          importLifecycle: false,
+          importCommitting: false,
+        },
         analytics: { ready: false },
         configuration: { ready: false },
       },
@@ -60,14 +112,15 @@ export async function GET() {
   }
 
   const [database, analytics] = await Promise.all([
-    databaseReady(),
+    databaseReadiness(),
     analyticsHealth(),
   ]);
-  const ready = database && analytics.ok;
+  const ready = database.ready && analytics.ok;
+  const status = ready ? (database.complete ? "ready" : "degraded") : "not_ready";
   return Response.json(
     {
-      status: ready ? "ready" : "not_ready",
-      database: { ready: database },
+      status,
+      database,
       analytics: { ready: analytics.ok },
       configuration: { ready: true },
     },

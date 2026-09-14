@@ -22,7 +22,11 @@ export default async function BuilderPage({
     const [study] = await tx`select id, title, status, draft_definition from studies where id = ${id} and org_id = ${session.orgId}`;
     if (!study) return null;
     const comments = await tx`
-      select c.id, c.parent_id, c.question_code, c.body, c.status,
+      select c.id, c.parent_id,
+             case when c.question_code like '__section__:%' then null else c.question_code end as question_code,
+             case when to_jsonb(c)->>'section_id' is not null then to_jsonb(c)->>'section_id'
+                  when c.question_code like '__section__:%' then substring(c.question_code from 12)
+                  else null end as section_id, c.body, c.status,
              c.created_at::text, c.resolved_at::text, coalesce(u.full_name, 'Tidligere bruger') as author,
              resolver.full_name as resolved_by_name
       from comments c
@@ -47,6 +51,8 @@ export default async function BuilderPage({
         studyId={id}
         initialTitle={data.study.title as string}
         initialDefinition={instrumentDefinition.parse(data.study.draft_definition)}
+        initialComments={data.comments as unknown as StudyCommentRow[]}
+        canResolveComments={can(session.role, "comments.resolve")}
         previewUrl={`${env.appBaseUrl}/p/${previewToken}`}
       />
     );
@@ -55,7 +61,7 @@ export default async function BuilderPage({
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted">
-        Ændringer gemmes i kladden. Publicering fastfryser en uforanderlig version.
+        Changes are saved to the draft. Publishing freezes an immutable version.
       </p>
       <Builder
         studyId={id}

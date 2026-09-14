@@ -3,11 +3,7 @@ import { Card, LinkButton, PageHeader } from "@/components/ui";
 import { requireSession } from "@/lib/auth";
 import { withUser } from "@/lib/db";
 import {
-  applyGovernance,
-  getGovernance,
-  listPanelistIds,
   listPanelists,
-  MAX_AUDIENCE_IDS,
   panelFilterOptionValues,
   parsePanelFilters,
   type PanelFilterGroup,
@@ -83,15 +79,6 @@ export default async function PanelPage({ searchParams }: { searchParams: Promis
     const { rows, total: filtered } = effectivePage === page ? firstPage : await listPanelists(tx, listParams);
     const [totalRow] = await tx`select count(*)::int as count from panelists where org_id = ${session.orgId}`;
 
-    let available: number | null = null;
-    try {
-      const ids = await listPanelistIds(tx, listParams, { max: MAX_AUDIENCE_IDS });
-      const governance = await getGovernance(tx, session.orgId);
-      available = (await applyGovernance(tx, ids, governance)).eligible.length;
-    } catch {
-      available = null;
-    }
-
     const [tagRows, customFields, messageRows, observedRows] = await Promise.all([
       tx`select name from tags where org_id = ${session.orgId} order by name`,
       tx`select key, label, options from custom_fields where org_id = ${session.orgId} order by key`,
@@ -144,7 +131,7 @@ export default async function PanelPage({ searchParams }: { searchParams: Promis
     const messages: MessageOption[] = messageRows.map((message) => ({
       id: String(message.id), label: String(message.subject ?? message.name), date: fmtDate(message.message_created_at ?? message.created_at),
     }));
-    return { rows, filtered, total: Number(totalRow.count), page: effectivePage, available, filterFields, messages, ageAttributeKey, carAttributeKey, productsAttributeKey };
+    return { rows, filtered, total: Number(totalRow.count), page: effectivePage, filterFields, messages, ageAttributeKey, carAttributeKey, productsAttributeKey };
   });
 
   const totalPages = Math.max(1, Math.ceil(data.filtered / PAGE_SIZE));
@@ -167,29 +154,31 @@ export default async function PanelPage({ searchParams }: { searchParams: Promis
         {can(session.role, "panel.export") && <LinkButton href={exportHref}>Eksportér CSV</LinkButton>}
         {can(session.role, "panel.import") && <LinkButton href="/panel/import" variant="primary">Importér</LinkButton>}
       </>} />
-      <PanelFilterPanel key={sp.filters ?? "no-filters"} fields={data.filterFields} messages={data.messages} initialFilters={asClientFilters(filters)}
-        total={data.total} filtered={data.filtered} available={data.available} currentSearch={sp.q} />
-      <Card>
-        <div className="mb-3 border-b border-line pb-3">
-          <h2 className="text-base font-semibold text-heading">Panelister</h2>
-          <p className="mt-1 text-xs text-muted">Standardvisning med kontakt og centrale OK-paneldata.</p>
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <Card title="Panelister" actions={<span className="text-xs text-muted">{data.filtered} match</span>}>
+          <p className="mb-3 text-xs text-muted">Panelists matching current selection.</p>
+          <PanelTable canEdit={can(session.role, "panel.edit")} rows={data.rows.map((row) => ({
+            id: row.id as string,
+            name: [row.first_name, row.last_name].filter(Boolean).join(" ") || "(anonymised)",
+            email: (row.email as string | null) ?? "—",
+            car: attributeDisplay(row.attributes, data.carAttributeKey),
+            age: displayAge(row.attributes, data.ageAttributeKey, row.birth_year),
+            products: attributeDisplay(row.attributes, data.productsAttributeKey),
+          }))} />
+          {data.filtered > PAGE_SIZE && <nav className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4" aria-label="Panelist pages">
+            <p className="text-xs text-muted">Page {currentPage} of {totalPages} · {data.filtered} matches</p>
+            <div className="flex gap-2">
+              {currentPage > 1 && <LinkButton href={pageHref(currentPage - 1)} variant="secondary">Previous</LinkButton>}
+              {currentPage < totalPages && <LinkButton href={pageHref(currentPage + 1)} variant="secondary">Next</LinkButton>}
+            </div>
+          </nav>}
+        </Card>
+
+        <div className="lg:sticky lg:top-4">
+          <PanelFilterPanel key={sp.filters ?? "no-filters"} fields={data.filterFields} messages={data.messages} initialFilters={asClientFilters(filters)}
+            total={data.total} filtered={data.filtered} currentSearch={sp.q} />
         </div>
-        <PanelTable canEdit={can(session.role, "panel.edit")} rows={data.rows.map((row) => ({
-          id: row.id as string,
-          name: [row.first_name, row.last_name].filter(Boolean).join(" ") || "(anonymiseret)",
-          email: (row.email as string | null) ?? "—",
-          car: attributeDisplay(row.attributes, data.carAttributeKey),
-          age: displayAge(row.attributes, data.ageAttributeKey, row.birth_year),
-          products: attributeDisplay(row.attributes, data.productsAttributeKey),
-        }))} />
-        {data.filtered > PAGE_SIZE && <nav className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4" aria-label="Panelist pages">
-          <p className="text-xs text-muted">Side {currentPage} af {totalPages} · {data.filtered} match</p>
-          <div className="flex gap-2">
-            {currentPage > 1 && <LinkButton href={pageHref(currentPage - 1)} variant="secondary">Forrige</LinkButton>}
-            {currentPage < totalPages && <LinkButton href={pageHref(currentPage + 1)} variant="secondary">Næste</LinkButton>}
-          </div>
-        </nav>}
-      </Card>
+      </div>
     </div>
   );
 }

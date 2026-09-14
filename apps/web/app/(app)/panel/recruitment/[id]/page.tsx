@@ -20,7 +20,7 @@ export default async function RecruitmentPageEditor({ params }: { params: Promis
         </Link>
         <h1 className="mt-1 font-display text-2xl tracking-tight text-heading">{data.page.internalName}</h1>
       </div>
-      <RecruitmentEditor page={data.page} questions={data.questions} availableFields={data.availableFields} />
+      <RecruitmentEditor page={data.page} questions={data.questions} availableFields={data.availableFields} availableFilterQuestions={data.availableFilterQuestions} />
     </div>
   );
 }

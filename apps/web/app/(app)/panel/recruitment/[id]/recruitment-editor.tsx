@@ -6,6 +6,7 @@ import { Badge, Button, Card, Input, Label, Select, Textarea } from "@/component
 import { CUSTOM_FIELD_TYPE, LOGO_POSITION, label as dkLabel } from "@/lib/labels";
 import type { RecruitmentPageDetail, RecruitmentPagePatch } from "../actions";
 import {
+  addFilterQuestionToPage,
   addQuestionToPage,
   createAndAttachQuestion,
   deleteRecruitmentPage,
@@ -16,7 +17,7 @@ import {
 } from "../actions";
 
 interface QuestionRow {
-  id: string; key: string; label: string; fieldType: string; options: string[]; required: boolean; position: number;
+  id: string; key: string; label: string; fieldType: string; options: string[]; required: boolean; position: number; sourceKey?: string | null;
 }
 interface AvailableField {
   id: string; key: string; label: string; fieldType: string; options: string[];
@@ -54,11 +55,12 @@ function ImageField({
 }
 
 export function RecruitmentEditor({
-  page, questions: initialQuestions, availableFields: initialAvailable,
+  page, questions: initialQuestions, availableFields: initialAvailable, availableFilterQuestions,
 }: {
   page: RecruitmentPageDetail;
   questions: QuestionRow[];
   availableFields: AvailableField[];
+  availableFilterQuestions: { key: string; label: string; fieldType: string; options: readonly string[] }[];
 }) {
   const router = useRouter();
   const [form, setForm] = useState({
@@ -87,6 +89,7 @@ export function RecruitmentEditor({
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [newQuestionField, setNewQuestionField] = useState("");
+  const [newFilterQuestion, setNewFilterQuestion] = useState("");
   const [showNewQuestion, setShowNewQuestion] = useState(false);
   const [newLabel, setNewLabel] = useState("");
   const [newType, setNewType] = useState<string>("text");
@@ -266,6 +269,15 @@ export function RecruitmentEditor({
           ))}
           {initialQuestions.length === 0 && <li className="text-sm text-muted">Ingen spørgsmål tilføjet endnu.</li>}
         </ul>
+
+        {availableFilterQuestions.length > 0 && <div className="rounded-lg border border-accent/20 bg-accent-soft/30 p-3">
+          <Label htmlFor="rp-add-filter-q">Add from panel filters</Label>
+          <div className="mt-2 flex flex-wrap items-end gap-2">
+            <Select id="rp-add-filter-q" value={newFilterQuestion} onChange={(e) => setNewFilterQuestion(e.target.value)}><option value="">Choose panel filter question…</option>{availableFilterQuestions.map((field) => <option key={field.key} value={field.key}>{field.label}</option>)}</Select>
+            <Button size="sm" variant="secondary" disabled={!newFilterQuestion || pending} onClick={() => startTransition(async () => { await addFilterQuestionToPage(page.id, newFilterQuestion); setNewFilterQuestion(""); router.refresh(); })}>Add filter question</Button>
+          </div>
+          <p className="mt-2 text-xs text-muted">Questions use same fields as Panelist selector and feed new panelists into matching segments.</p>
+        </div>}
 
         <div className="mt-3 flex flex-wrap items-end gap-2">
           <div>

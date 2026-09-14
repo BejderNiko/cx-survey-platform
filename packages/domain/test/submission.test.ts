@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { instrumentDefinition, validateSubmission } from "../src";
+import { instrumentDefinition, validateInstrument, validateSubmission } from "../src";
 
 const definition = instrumentDefinition.parse({
   languages: ["en"],
@@ -174,5 +174,32 @@ describe("respondent submission validation", () => {
 
     expect(result).toMatchObject({ ok: false });
     if (!result.ok) expect(result.errors.join(" ")).toContain("inside the image dimensions");
+  });
+});
+
+
+describe("multiple select limits", () => {
+  const limited = instrumentDefinition.parse({
+    languages: ["en"], defaultLanguage: "en", messages: {}, blocks: [{ id: "main", questions: [{
+      code: "channels", type: "multiple_choice", label: { en: "Channels" }, required: true,
+      multipleSelectLimit: 1,
+      options: [{ id: "email", label: { en: "Email" } }, { id: "sms", label: { en: "SMS" } }],
+    }] }],
+  });
+
+  it("rejects answers above configured selection limit", () => {
+    const result = validateSubmission(limited, {
+      status: "completed",
+      answers: [{ code: "channels", type: "multiple_choice", value: ["email", "sms"] }],
+      interactions: [],
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toContain("select limit cannot be exceeded");
+  });
+
+  it("reports invalid authoring limit above option count", () => {
+    const invalid = structuredClone(limited);
+    invalid.blocks[0].questions[0].multipleSelectLimit = 3;
+    expect(validateInstrument(invalid).join(" ")).toContain("select limit cannot exceed its option count");
   });
 });

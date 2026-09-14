@@ -140,6 +140,6 @@ test.describe("analyse", () => {
     await page.getByRole("link", { name: /Relationel NPS 2026 H2 — besvarelser/ }).first().click();
     await page.waitForSelector("text=Arbejdsområde — v1");
     await expect(page.getByRole("button", { name: "Kør analyse" })).toHaveCount(0);
-    await expect(page.getByText("Byg datasæt fra studiebesvarelser")).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "R workspace" })).toBeVisible();
   });
 });

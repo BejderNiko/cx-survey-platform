@@ -7,6 +7,7 @@ import {
   runAnalysisRemote,
   AnalyticsServiceError,
   type AnalysisResultPayload,
+  type DatasetPayload,
 } from "@/lib/analytics-client";
 import { buildStudyDataset, insertDatasetVersion, loadDatasetPayload } from "@/lib/data/datasets";
 
@@ -24,6 +25,32 @@ export async function createDatasetFromStudy(studyId: string) {
   return result;
 }
 
+
+const MAX_R_ROWS = 20_000;
+
+/** Load an organization-scoped dataset for the browser R workspace. */
+export async function loadRDataset(versionId: string): Promise<{
+  datasetId: string;
+  versionNumber: number;
+  rowCount: number;
+  payload: DatasetPayload;
+}> {
+  return withAuthorized("analytics.run", async (tx, session) => {
+    const [version] = await tx`
+      select dv.dataset_id, dv.version_number, dv.row_count
+      from dataset_versions dv
+      where dv.id = ${versionId} and dv.org_id = ${session.orgId}`;
+    if (!version) throw new Error("Dataset version was not found.");
+    const payload = await loadDatasetPayload(tx, session.orgId, versionId);
+    if (!payload) throw new Error("Dataset version was not found.");
+    return {
+      datasetId: String(version.dataset_id),
+      versionNumber: Number(version.version_number),
+      rowCount: Math.min(Number(version.row_count), MAX_R_ROWS),
+      payload: { ...payload, rows: payload.rows.slice(0, MAX_R_ROWS) },
+    };
+  });
+}
 export interface RunAnalysisInput {
   datasetVersionId: string;
   procedure: string;

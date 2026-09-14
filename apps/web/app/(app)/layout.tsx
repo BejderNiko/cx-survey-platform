@@ -38,7 +38,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       <nav aria-label="Primær" className="sticky top-0 hidden h-screen w-60 shrink-0 self-start flex-col overflow-y-auto border-r border-line bg-surface md:flex">
         <div className="px-5 pb-4 pt-5">
           <div className="font-display text-xl tracking-tight text-heading">
-            OK<span className="text-accent"> · CX</span>
+            <span className="rounded-md bg-accent px-2 py-0.5 text-sm font-bold tracking-tight text-white">OK</span><span className="font-display text-xl tracking-tight text-heading">CX</span>
           </div>
           <div className="mt-0.5 text-[11px] uppercase tracking-widest text-muted">Kundeindsigt</div>
         </div>
@@ -75,7 +75,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       </nav>
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="app-topbar flex items-center justify-between gap-2 border-b border-line bg-surface px-4 py-2 md:hidden">
-          <span className="font-display text-base text-heading">OK · CX</span>
+          <span className="flex items-center gap-2"><span className="rounded bg-accent px-1.5 py-0.5 text-xs font-bold text-white">OK</span><span className="font-display text-base text-heading">CX</span></span>
           <form action={signOut}>
             <button type="submit" className="text-xs text-muted underline">
               {t("sign_out")}

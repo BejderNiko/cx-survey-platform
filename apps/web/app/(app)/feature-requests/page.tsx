@@ -25,8 +25,8 @@ export default async function FeatureRequestsPage() {
     return (
       <div className="space-y-4">
         <PageHeader title="Feature requests" description="Intern inbox med status, ejer og audit trail." />
-        <Card title="Migration kræves">
-          <p className="text-sm">Migration 20260909000014 er forfattet, men ikke kørt. AGENTS.md kræver din godkendelse før migration.</p>
+        <Card title="Feature request storage unavailable">
+          <p className="text-sm">Feature request storage is not available in this environment.</p>
         </Card>
       </div>
     );
@@ -45,6 +45,7 @@ export default async function FeatureRequestsPage() {
     sourcePath: row.source_path ? String(row.source_path) : null,
     section: row.section ? String(row.section) : null,
     targetSnapshot: (row.target_snapshot ?? {}) as Record<string, unknown>,
+    sourceType: String((row.target_snapshot as Record<string, unknown> | null)?.sourceType ?? "manual"),
     events: data.events
       .filter((event) => event.feature_request_id === row.id)
       .map((event) => ({

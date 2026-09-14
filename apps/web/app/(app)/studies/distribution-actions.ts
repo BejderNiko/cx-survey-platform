@@ -6,7 +6,7 @@ import { segmentDefinition } from "@ok/domain";
 import { withAuthorized } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { env } from "@/lib/env";
-import { parsePanelFilters, resolveAudience } from "@/lib/data/panel";
+import { applyGovernance, getGovernance, listPanelistIds, parsePanelFilters, resolveAudience } from "@/lib/data/panel";
 
 function token(prefix: string): string {
   return `${prefix}_${randomBytes(12).toString("base64url")}`;
@@ -69,6 +69,75 @@ export interface InviteInput {
  * øjebliksbilledet og lægger simulerede beskeder i udbakken. Der sendes ingen
  * rigtige e-mails.
  */
+export interface PanelAudiencePreview {
+  candidates: number;
+  eligible: number;
+  selected: number;
+  excluded: Record<string, number>;
+  maxInviteSize: number;
+  blockingReason: string | null;
+  panelists: { id: string; name: string; email: string }[];
+}
+
+export async function previewPanelAudience(input: Pick<InviteInput, "studyId" | "segmentId" | "method" | "sampleSize" | "filters">): Promise<PanelAudiencePreview> {
+  return withAuthorized("distributions.create", async (tx, session) => {
+    const [study] = await tx`select id from studies where id = ${input.studyId} and org_id = ${session.orgId}`;
+    if (!study) throw new Error("Study was not found.");
+    if (input.method !== "all" && input.method !== "random") throw new Error("Audience method must be all or random.");
+    let segment = null;
+    if (input.segmentId) {
+      const [seg] = await tx`
+        select definition from segments
+        where id = ${input.segmentId} and org_id = ${session.orgId}`;
+      if (!seg) throw new Error("Segment was not found.");
+      segment = segmentDefinition.parse(seg.definition);
+    }
+    const filters = parsePanelFilters(input.filters);
+    if (input.filters && input.filters !== "[]" && filters.length === 0) {
+      throw new Error("Panel filters are invalid or incomplete.");
+    }
+    if (input.method === "random" && (
+      typeof input.sampleSize !== "number" ||
+      !Number.isSafeInteger(input.sampleSize) ||
+      input.sampleSize < 1
+    )) {
+      throw new Error("Random audiences require a positive integer sample size.");
+    }
+    const candidateIds = await listPanelistIds(tx, {
+      segment,
+      filters,
+      lifecycle: "active",
+    });
+    const governance = await getGovernance(tx, session.orgId);
+    const { eligible, excluded } = await applyGovernance(tx, candidateIds, governance);
+    const selected = input.method === "random"
+      ? Math.min(input.sampleSize ?? 0, eligible.length)
+      : eligible.length;
+    const previewPanelists = await tx`
+      select id, concat_ws(' ', first_name, last_name) as name, email::text as email
+      from panelists
+      where org_id = ${session.orgId} and id = any(${tx.array(candidateIds.slice(0, 50))}::uuid[])
+      order by last_name asc, first_name asc
+      limit 50`;
+    const excludedSummary: Record<string, number> = {};
+    for (const item of excluded) excludedSummary[item.reason] = (excludedSummary[item.reason] ?? 0) + 1;
+    const blockingReason = selected === 0
+      ? "No eligible panelists after governance rules."
+      : selected > governance.maxInviteSize
+        ? "Selection exceeds the governance invitation cap."
+        : null;
+    return {
+      candidates: candidateIds.length,
+      eligible: eligible.length,
+      selected,
+      excluded: excludedSummary,
+      maxInviteSize: governance.maxInviteSize,
+      blockingReason,
+      panelists: previewPanelists.map((row) => ({ id: String(row.id), name: String(row.name ?? "(anonymised)"), email: String(row.email ?? "—") })),
+    };
+  });
+}
+
 export async function createPanelInvite(input: InviteInput) {
   const result = await withAuthorized("distributions.create", async (tx, session) => {
     const [version] = await tx`
@@ -83,7 +152,8 @@ export async function createPanelInvite(input: InviteInput) {
       const [seg] = await tx`
         select definition from segments
         where id = ${input.segmentId} and org_id = ${session.orgId}`;
-      if (seg) segment = segmentDefinition.parse(seg.definition);
+      if (!seg) throw new Error("Segment was not found.");
+      segment = segmentDefinition.parse(seg.definition);
     }
     const filters = parsePanelFilters(input.filters);
     if (input.filters && input.filters !== "[]" && filters.length === 0) {

@@ -53,6 +53,22 @@ export const QUESTION_TYPES = [
 ] as const;
 export type QuestionType = (typeof QUESTION_TYPES)[number];
 
+export const AUTHORING_QUESTION_TYPES = [
+  "nps",
+  "single_choice",
+  "multiple_choice",
+  "short_text",
+  "long_text",
+  "number",
+  "rating",
+  "likert",
+  "ranking",
+  "first_click",
+  "preference_test",
+  "prototype_test",
+] as const satisfies readonly QuestionType[];
+export type AuthoringQuestionType = (typeof AUTHORING_QUESTION_TYPES)[number];
+
 export const conditionOp = z.enum([
   "eq", "ne", "lt", "lte", "gt", "gte", "in", "not_in", "contains", "answered", "not_answered",
 ]);
@@ -88,6 +104,7 @@ export const stimulusAsset = z.object({
   id: z.string().min(1).max(100),
   assetId: z.string().uuid(),
   altText: z.string().trim().min(1).max(500),
+  enabled: z.boolean().optional(),
   displayWidthPercent: z.number().int().min(20).max(100).optional(),
 });
 export type StimulusAsset = z.infer<typeof stimulusAsset>;
@@ -132,6 +149,7 @@ export const question = z.object({
   hidden: z.boolean().optional(),                  // excluded from participant preview/live flow
   options: z.array(option).optional(),          // choice / likert / ranking types
   randomizeOptions: z.boolean().optional(),
+  multipleSelectLimit: z.number().int().min(1).max(100).optional(),
   scale: z
     .object({
       min: z.number(),
@@ -247,6 +265,10 @@ export function validateInstrument(def: InstrumentDefinition): string[] {
     if (needsOptions.includes(q.type) && (!q.options || q.options.length < 2)) {
       problems.push(`Question '${q.code}' needs at least two options.`);
     }
+    if (q.type === "multiple_choice" && q.multipleSelectLimit !== undefined
+      && q.options && q.multipleSelectLimit > q.options.length) {
+      problems.push("Question '" + q.code + "' select limit cannot exceed its option count.");
+    }
     if (q.type === "matrix" && (!q.rows?.length || !q.options?.length)) {
       problems.push(`Matrix question '${q.code}' needs rows and columns.`);
     }
@@ -273,10 +295,10 @@ export function validateInstrument(def: InstrumentDefinition): string[] {
       problems.push(`Question '${q.code}' uses legacy imageUrl. Upload a protected media asset before saving or publishing a new draft.`);
     }
     if (q.type === "first_click" && !q.imageUrl && !q.stimulus && !(q.stimuli?.length)) {
-      problems.push(`Første-klik-spørgsmålet '${q.code}' mangler et stimulusbillede.`);
+      problems.push(`First-click question '${q.code}' is missing a stimulus image.`);
     }
     if (q.type === "preference_test" && (!q.stimuli || q.stimuli.length < 2 || q.stimuli.length > 8)) {
-      problems.push(`Præferencetesten '${q.code}' skal have mellem 2 og 8 billeder.`);
+      problems.push(`Preference test '${q.code}' needs between 2 and 8 images.`);
     }
     if (q.type === "prototype_test") {
       if (!q.prototype) problems.push(`Prototype test '${q.code}' is missing Figma configuration.`);

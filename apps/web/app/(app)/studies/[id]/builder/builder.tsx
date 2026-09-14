@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState, useTransition } from "react";
 import {
+  AUTHORING_QUESTION_TYPES,
   groupedQuestionTypes,
   QUESTION_TYPE_METADATA,
   validateInstrument,
@@ -17,7 +18,7 @@ import { CommentsPanel, type StudyCommentRow } from "../comments-panel";
 /** Kladdeeditor til instrumentet: spørgsmålsliste, editor pr. spørgsmål, logik, forhåndsvisning. */
 
 const CONDITION_OPS = ["eq", "ne", "lt", "lte", "gt", "gte", "answered"] as const;
-const QUESTION_GROUPS = groupedQuestionTypes();
+const QUESTION_GROUPS = groupedQuestionTypes().map((group) => ({ ...group, items: group.items.filter((item) => (AUTHORING_QUESTION_TYPES as readonly string[]).includes(item.type)) })).filter((group) => group.items.length > 0);
 
 
 const OP_LABEL: Record<string, string> = {
@@ -283,7 +284,7 @@ export function Builder({
             )}
             {current && (
               <div className="mt-5 border-t border-line pt-4">
-                <h2 className="mb-3 text-sm font-semibold">Kommentarer til {current.code}</h2>
+                <h2 className="mb-3 text-sm font-semibold">Comments on {current.code}</h2>
                 <CommentsPanel
                   studyId={studyId}
                   comments={initialComments}

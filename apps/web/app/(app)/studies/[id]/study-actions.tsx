@@ -3,13 +3,13 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui";
-import { deleteStudy, duplicateStudy, publishStudy, setStudyStatus } from "../actions";
+import { deleteStudy, publishStudy, setStudyStatus } from "../actions";
 
 export function StudyActions({
-  studyId, status, canPublish, canClose, canCreate,
+  studyId, status, canPublish, canClose,
   canDelete,
 }: {
-  studyId: string; status: string; canPublish: boolean; canClose: boolean; canCreate: boolean;
+  studyId: string; status: string; canPublish: boolean; canClose: boolean;
   canDelete: boolean;
 }) {
   const router = useRouter();
@@ -55,11 +55,6 @@ export function StudyActions({
         <Button variant="secondary" disabled={pending}
           onClick={() => startTransition(() => setStudyStatus(studyId, "live"))}>
           Genoptag
-        </Button>
-      )}
-      {canCreate && (
-        <Button variant="secondary" disabled={pending} onClick={() => startTransition(() => duplicateStudy(studyId))}>
-          Duplikér
         </Button>
       )}
       {canClose && status !== "archived" && (

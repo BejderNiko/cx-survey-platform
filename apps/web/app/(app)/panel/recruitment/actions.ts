@@ -22,6 +22,14 @@ function newPublicToken(internalName: string): string {
   return `${randomBytes(6).toString("base64url")}_${slugify(internalName)}`;
 }
 
+const NATIVE_RECRUITMENT_QUESTIONS = [
+  { key: "age", label: "Age", fieldType: "number", options: [] as string[] },
+  { key: "uddannelse", label: "Education", fieldType: "select", options: ["Folkeskole", "Studentereksamen", "Erhvervsfaglig", "Kort videregående under 3 år", "Mellemlang videregående 3-4 år", "Lang videregående over 4 år", "Ønsker ikke at oplyse"] },
+  { key: "opvarmningskilde", label: "Heating source", fieldType: "select", options: ["Pillefyr", "Elvarme", "Varmepumpe", "Fjernvarme", "Jordvarme", "Solvarme", "Brændeovn", "Oliefyr", "Naturgas", "Bioenergi"] },
+  { key: "customer_status", label: "Customer relation", fieldType: "select", options: ["customer", "former", "prospect", "member"] },
+  { key: "tag", label: "Tags", fieldType: "select", options: [] as string[] },
+] as const;
+
 export interface RecruitmentPageSummary {
   id: string;
   internalName: string;
@@ -36,8 +44,8 @@ export async function listRecruitmentPages(): Promise<RecruitmentPageSummary[]> 
     const rows = await tx`
       select rp.id, rp.internal_name, rp.is_active, rp.public_token,
              coalesce((
-               select array_agg(cf.label order by rpq.position)
-               from recruitment_page_questions rpq join custom_fields cf on cf.id = rpq.custom_field_id
+               select array_agg(coalesce(cf.label, case rpq.source_key when 'age' then 'Age' when 'uddannelse' then 'Education' when 'opvarmningskilde' then 'Heating source' when 'customer_status' then 'Customer relation' when 'tag' then 'Tags' else rpq.source_key end) order by rpq.position)
+               from recruitment_page_questions rpq left join custom_fields cf on cf.id = rpq.custom_field_id
                where rpq.recruitment_page_id = rp.id
              ), '{}') as question_labels,
              (select count(*) from recruitment_submissions rs where rs.recruitment_page_id = rp.id)::int as submission_count
@@ -110,15 +118,18 @@ export async function getRecruitmentPageForEdit(id: string) {
     const [row] = await tx`select * from recruitment_pages where id = ${id} and org_id = ${session.orgId}`;
     if (!row) return null;
     const questions = await tx`
-      select cf.id, cf.key, cf.label, cf.field_type, cf.options, rpq.required, rpq.position
-      from recruitment_page_questions rpq join custom_fields cf on cf.id = rpq.custom_field_id
+      select rpq.id as question_id, rpq.source_key, cf.id, cf.key, cf.label, cf.field_type, cf.options, rpq.required, rpq.position
+      from recruitment_page_questions rpq left join custom_fields cf on cf.id = rpq.custom_field_id
       where rpq.recruitment_page_id = ${id} and rpq.org_id = ${session.orgId} order by rpq.position`;
     const availableFields = await tx`
-      select id, key, label, field_type, options from custom_fields
-      where org_id = ${session.orgId} and id not in (
-        select custom_field_id from recruitment_page_questions where recruitment_page_id = ${id}
+      select id, key, label, field_type, options from custom_fields cf
+      where cf.org_id = ${session.orgId} and not exists (
+        select 1 from recruitment_page_questions rpq
+        where rpq.recruitment_page_id = ${id} and rpq.custom_field_id = cf.id
       )
       order by label`;
+    const attachedNative = new Set(questions.flatMap((question) => question.source_key ? [String(question.source_key)] : []));
+    const availableFilterQuestions = NATIVE_RECRUITMENT_QUESTIONS.filter((question) => !attachedNative.has(question.key)).map((question) => ({ ...question }));
     const detail: RecruitmentPageDetail = {
       id: row.id as string,
       internalName: row.internal_name as string,
@@ -145,10 +156,11 @@ export async function getRecruitmentPageForEdit(id: string) {
     return {
       page: detail,
       questions: questions.map((q) => ({
-        id: q.id as string, key: q.key as string, label: q.label as string,
-        fieldType: q.field_type as string, options: (q.options ?? []) as string[],
+        id: q.question_id as string, key: String(q.source_key ?? q.key ?? ""), label: String(q.label ?? NATIVE_RECRUITMENT_QUESTIONS.find((item) => item.key === q.source_key)?.label ?? q.key ?? "Question"),
+        fieldType: String(q.field_type ?? NATIVE_RECRUITMENT_QUESTIONS.find((item) => item.key === q.source_key)?.fieldType ?? "text"), options: (q.options ?? NATIVE_RECRUITMENT_QUESTIONS.find((item) => item.key === q.source_key)?.options ?? []) as string[], sourceKey: q.source_key as string | null,
         required: q.required as boolean, position: q.position as number,
       })),
+      availableFilterQuestions,
       availableFields: availableFields.map((f) => ({
         id: f.id as string, key: f.key as string, label: f.label as string,
         fieldType: f.field_type as string, options: (f.options ?? []) as string[],
@@ -236,8 +248,8 @@ export async function cloneRecruitmentPage(id: string) {
         ${src.screening_continue_label}, ${src.screening_end_label}, ${src.screening_end_content}, ${session.userId}
       ) returning id`;
     await tx`
-      insert into recruitment_page_questions (org_id, recruitment_page_id, custom_field_id, position, required)
-      select ${session.orgId}, ${copy.id}, custom_field_id, position, required
+      insert into recruitment_page_questions (org_id, recruitment_page_id, custom_field_id, position, required, source_key)
+      select ${session.orgId}, ${copy.id}, custom_field_id, position, required, source_key
       from recruitment_page_questions where recruitment_page_id = ${id} and org_id = ${session.orgId}`;
     await audit(tx, {
       orgId: session.orgId, actorUserId: session.userId,
@@ -278,11 +290,22 @@ export async function addQuestionToPage(pageId: string, customFieldId: string) {
   revalidatePath(`/panel/recruitment/${pageId}`);
 }
 
+export async function addFilterQuestionToPage(pageId: string, sourceKey: string) {
+  await withAuthorized("recruitment.manage", async (tx, session) => {
+    await requireRecruitmentPage(tx, pageId, session.orgId);
+    const question = NATIVE_RECRUITMENT_QUESTIONS.find((item) => item.key === sourceKey);
+    if (!question) throw new Error("Panel filter question was not found.");
+    const [{ next }] = await tx`select coalesce(max(position), -1) + 1 as next from recruitment_page_questions where recruitment_page_id = ${pageId} and org_id = ${session.orgId}`;
+    await tx`insert into recruitment_page_questions (org_id, recruitment_page_id, source_key, position) values (${session.orgId}, ${pageId}, ${question.key}, ${next}) on conflict (recruitment_page_id, source_key) where source_key is not null do nothing`;
+  });
+  revalidatePath(`/panel/recruitment/${pageId}`);
+}
+
 export async function removeQuestionFromPage(pageId: string, customFieldId: string) {
   await withAuthorized("recruitment.manage", async (tx, session) => {
     await requireRecruitmentPage(tx, pageId, session.orgId);
     await tx`delete from recruitment_page_questions
-             where recruitment_page_id = ${pageId} and custom_field_id = ${customFieldId} and org_id = ${session.orgId}`;
+             where id = ${customFieldId} and recruitment_page_id = ${pageId} and org_id = ${session.orgId}`;
   });
   revalidatePath(`/panel/recruitment/${pageId}`);
 }
@@ -291,7 +314,7 @@ export async function setQuestionRequired(pageId: string, customFieldId: string,
   await withAuthorized("recruitment.manage", async (tx, session) => {
     await requireRecruitmentPage(tx, pageId, session.orgId);
     await tx`update recruitment_page_questions set required = ${required}
-             where recruitment_page_id = ${pageId} and custom_field_id = ${customFieldId} and org_id = ${session.orgId}`;
+             where id = ${customFieldId} and recruitment_page_id = ${pageId} and org_id = ${session.orgId}`;
   });
   revalidatePath(`/panel/recruitment/${pageId}`);
 }

@@ -17,6 +17,8 @@ import { issueDraftPreviewToken } from "@/lib/preview-token";
 import { audit } from "@/lib/audit";
 import { deleteStimulusObjectWithRetry } from "@/lib/stimulus-storage";
 
+const SECTION_COMMENT_PREFIX = "__section__:";
+
 const BLANK_SURVEY: InstrumentDefinition = {
   languages: ["da"],
   defaultLanguage: "da",
@@ -142,7 +144,7 @@ export async function setStudyStatus(studyId: string, status: "paused" | "closed
       update studies set status = ${status}::study_status, updated_at = now()
       where id = ${studyId} and org_id = ${session.orgId}
       returning id`;
-    if (updated.length !== 1) throw new Error("Studiet blev ikke fundet.");
+    if (updated.length !== 1) throw new Error("Study was not found.");
     await audit(tx, {
       orgId: session.orgId, actorUserId: session.userId,
       action: `study.${status}`, entityType: "study", entityId: studyId,
@@ -176,7 +178,7 @@ export async function deleteStudy(studyId: string): Promise<DeleteStudyResult> {
       for update`;
 
     if (!study) {
-      return { ok: false as const, reason: "Studiet blev ikke fundet.", canArchive: false };
+      return { ok: false as const, reason: "Study was not found.", canArchive: false };
     }
 
     const dependencies = [
@@ -257,45 +259,80 @@ export async function addStudyComment(input: {
   studyId: string;
   body: string;
   questionCode?: string | null;
+  sectionId?: string | null;
   parentId?: string;
 }): Promise<CommentActionResult> {
   const body = input.body.trim();
-  if (!body) return { ok: false, error: "Kommentaren er tom." };
-  if (body.length > 4000) return { ok: false, error: "Kommentaren må højst være 4.000 tegn." };
+  if (!body) return { ok: false, error: "Comment is empty." };
+  if (body.length > 4000) return { ok: false, error: "Comment must be 4,000 characters or fewer." };
   const result = await withAuthorized("comments.create", async (tx, session) => {
     const [study] = await tx`
       select draft_definition from studies
       where id = ${input.studyId} and org_id = ${session.orgId}`;
-    if (!study) return { ok: false as const, error: "Studiet blev ikke fundet." };
+    if (!study) return { ok: false as const, error: "Study was not found." };
+
+    const definitions = [
+      instrumentDefinition.safeParse(study.draft_definition),
+      ...(await tx`select definition from study_versions
+          where study_id = ${input.studyId} and org_id = ${session.orgId}
+          order by version_number desc limit 20`).map((row) => instrumentDefinition.safeParse(row.definition)),
+    ].flatMap((parsed) => parsed.success ? [parsed.data] : []);
+    if (definitions.length === 0) return { ok: false as const, error: "Study definition could not be read." };
 
     let questionCode = input.questionCode?.trim() || null;
-    if (questionCode) {
-      const definition = instrumentDefinition.parse(study.draft_definition);
-      if (!allQuestions(definition).some((question) => question.code === questionCode)) {
-        return { ok: false as const, error: "Spørgsmålet findes ikke i studiets kladde." };
-      }
-    }
-
+    let sectionId = input.sectionId?.trim() || null;
     let parentId: string | null = null;
     if (input.parentId) {
       const [parent] = await tx`
-        select id, question_code, parent_id from comments
+        select id, question_code, to_jsonb(comments)->>'section_id' as section_id, parent_id from comments
         where id = ${input.parentId} and org_id = ${session.orgId}
-          and study_id = ${input.studyId}`;
-      if (!parent || parent.parent_id) return { ok: false as const, error: "Kommentartråden blev ikke fundet." };
+          and study_id = ${input.studyId}
+      `;
+      if (!parent || parent.parent_id) return { ok: false as const, error: "Comment thread was not found." };
       parentId = parent.id as string;
-      questionCode = (parent.question_code as string | null) ?? null;
+      const parentQuestionCode = typeof parent.question_code === "string" ? parent.question_code : null;
+      if (parentQuestionCode?.startsWith(SECTION_COMMENT_PREFIX)) {
+        questionCode = null;
+        sectionId = parentQuestionCode.slice(SECTION_COMMENT_PREFIX.length) || null;
+      } else {
+        questionCode = parentQuestionCode;
+        sectionId = typeof parent.section_id === "string" ? parent.section_id : null;
+      }
     }
 
-    const [comment] = await tx`
-      insert into comments (org_id, entity_type, entity_id, study_id, question_code, parent_id, author_id, body)
-      values (${session.orgId}, 'study', ${input.studyId}, ${input.studyId}, ${questionCode},
-              ${parentId}, ${session.userId}, ${body})
-      returning id`;
+    const questionFound = !questionCode || definitions.some((definition) => allQuestions(definition).some((question) => question.code === questionCode));
+    if (!questionFound) return { ok: false as const, error: "Question was not found in the current study draft or published study." };
+    const sectionFound = !sectionId || definitions.some((definition) => definition.blocks.some((block) => block.id === sectionId));
+    if (!sectionFound) return { ok: false as const, error: "Section was not found in the current study draft or published study." };
+    if (questionCode && sectionId && !definitions.some((definition) => definition.blocks.some((block) => block.id === sectionId && block.questions.some((question) => question.code === questionCode)))) {
+      return { ok: false as const, error: "Question does not belong to the selected section." };
+    }
+
+    const [sectionColumn] = await tx`
+      select exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'comments' and column_name = 'section_id'
+      ) as available`;
+    let comment: { id: string };
+    if (sectionColumn?.available) {
+      const [inserted] = await tx`
+        insert into comments (org_id, entity_type, entity_id, study_id, question_code, section_id, parent_id, author_id, body)
+        values (${session.orgId}, 'study', ${input.studyId}, ${input.studyId}, ${questionCode}, ${sectionId},
+                ${parentId}, ${session.userId}, ${body})
+        returning id`;
+      comment = inserted as { id: string };
+    } else {
+      const [inserted] = await tx`
+        insert into comments (org_id, entity_type, entity_id, study_id, question_code, parent_id, author_id, body)
+        values (${session.orgId}, 'study', ${input.studyId}, ${input.studyId}, ${!sectionColumn?.available && sectionId && !questionCode ? SECTION_COMMENT_PREFIX + sectionId : questionCode},
+                ${parentId}, ${session.userId}, ${body})
+        returning id`;
+      comment = inserted as { id: string };
+    }
     await audit(tx, {
       orgId: session.orgId, actorUserId: session.userId, action: "comment.create",
       entityType: "study", entityId: input.studyId,
-      details: { commentId: comment.id as string, questionCode, parentId },
+      details: { commentId: comment.id as string, questionCode, sectionId, parentId },
     });
     return { ok: true as const };
   });
@@ -313,7 +350,7 @@ export async function resolveStudyComment(commentId: string, resolved: boolean):
           resolved_at = ${resolved ? new Date() : null}
       where id = ${commentId} and org_id = ${session.orgId} and entity_type = 'study' and parent_id is null
       returning study_id, question_code`;
-    if (!comment) return { ok: false as const, error: "Kommentaren blev ikke fundet." };
+    if (!comment) return { ok: false as const, error: "Comment was not found." };
     await audit(tx, {
       orgId: session.orgId, actorUserId: session.userId,
       action: resolved ? "comment.resolve" : "comment.reopen",

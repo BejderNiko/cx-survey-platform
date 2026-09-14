@@ -16,7 +16,7 @@ separate tools for panel management, UX research studies, operational CX
 - **Studies** — survey builder (16 question types incl. NPS/CSAT/CES, matrix,
   ranking, first-click tests), Danish/English variants, branching and display
   logic, immutable published versions, templates, duplicate, live results.
-- **Distributions** — public links with QR, tokenized panel invitations with
+- **Distributions** — public links, tokenized panel invitations with
   governance-checked, seed-recorded random sampling, simulated dev outbox
   (no real sending), delivery funnel tracking.
 - **Responses & Follow-up** — response inbox linked to exact instrument

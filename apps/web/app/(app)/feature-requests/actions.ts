@@ -8,16 +8,18 @@ const STATUSES = new Set(["new", "planned", "in_progress", "done", "declined"]);
 
 export type FeatureRequestActionResult = { ok: true } | { ok: false; error: string };
 
-export async function createFeatureRequest(input: { title: string; description: string; sourcePath?: string; section?: string; targetSnapshot?: Record<string, unknown> }): Promise<FeatureRequestActionResult> {
+export async function createFeatureRequest(input: { title: string; description: string; sourcePath?: string; section?: string; sourceType?: "manual" | "feedback"; targetSnapshot?: Record<string, unknown> }): Promise<FeatureRequestActionResult> {
   const title = input.title.trim();
   const description = input.description.trim();
   if (title.length < 3 || title.length > 160) return { ok: false, error: "Titel skal være 3-160 tegn." };
   if (description.length < 1 || description.length > 5000) return { ok: false, error: "Beskrivelse skal være 1-5.000 tegn." };
   try {
     await withAuthorized("feature_requests.create", async (tx, session) => {
+      const sourceType = input.sourceType ?? "manual";
+      const snapshot = { ...(input.targetSnapshot ?? {}), sourceType };
       const [request] = await tx`
         insert into feature_requests (org_id, title, description, source_path, section, target_snapshot, created_by)
-        values (${session.orgId}, ${title}, ${description}, ${input.sourcePath?.slice(0, 500) ?? null}, ${input.section?.slice(0, 120) ?? null}, ${tx.json((input.targetSnapshot ?? {}) as never)}, ${session.userId}) returning id`;
+        values (${session.orgId}, ${title}, ${description}, ${input.sourcePath?.slice(0, 500) ?? null}, ${input.section?.slice(0, 120) ?? null}, ${tx.json(snapshot as never)}, ${session.userId}) returning id`;
       await tx`
         insert into feature_request_events (org_id, feature_request_id, actor_user_id, event_type, details)
         values (${session.orgId}, ${request.id}, ${session.userId}, 'created', ${tx.json({ title } as never)})`;
@@ -58,6 +60,6 @@ export async function updateFeatureRequest(input: { id: string; status: string; 
 }
 
 function schemaMessage(error: unknown): string {
-  if (error && typeof error === "object" && "code" in error && (error.code === "42P01" || error.code === "42703")) return "Migration 20260909000014 er ikke anvendt i dette miljø.";
+  if (error && typeof error === "object" && "code" in error && (error.code === "42P01" || error.code === "42703")) return "Feature request storage is not available in this environment.";
   return error instanceof Error ? error.message : "Handlingen mislykkedes.";
 }

@@ -53,27 +53,29 @@ export function PanelFilterPanel({
   initialFilters,
   total,
   filtered,
-  available,
+
   currentSearch,
   navigation = true,
   onFiltersChange,
+  onFilterValidityChange,
 }: {
   fields: FilterField[];
   messages: MessageOption[];
   initialFilters: PanelFilterGroup[];
   total: number;
   filtered: number | null;
-  available: number | null;
+
   currentSearch?: string;
   navigation?: boolean;
   onFiltersChange?: (serialized: string) => void;
+  onFilterValidityChange?: (complete: boolean) => void;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [open, setOpen] = useState(initialFilters.length > 0);
   const [groups, setGroups] = useState<PanelFilterGroup[]>(initialFilters);
   const [showAllMessages, setShowAllMessages] = useState(false);
-  const [fieldQuery, setFieldQuery] = useState("");
+  const [fieldChoice, setFieldChoice] = useState("");
   const [pending, startTransition] = useTransition();
   const filterSignature = useMemo(() => serializeFilterGroups(groups), [groups]);
   const lastAutoAppliedSignature = useRef(filterSignature);
@@ -119,6 +121,7 @@ export function PanelFilterPanel({
   }, [complete, currentSearch, groups, searchParams]);
 
   useEffect(() => {
+    onFilterValidityChange?.(complete);
     if (!complete) return;
     onFiltersChange?.(filterSignature);
     if (!navigation || !panelUrl || lastAutoAppliedSignature.current === filterSignature) return;
@@ -127,7 +130,7 @@ export function PanelFilterPanel({
       startTransition(() => router.replace(panelUrl, { scroll: false }));
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [complete, filterSignature, navigation, onFiltersChange, panelUrl, router]);
+  }, [complete, filterSignature, navigation, onFilterValidityChange, onFiltersChange, panelUrl, router]);
 
   function applyFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -138,17 +141,17 @@ export function PanelFilterPanel({
     return fields.find((field) => field.key === group.field && (group.field !== "custom" || field.attributeKey === group.key));
   }
 
-  const normalizedFieldQuery = fieldQuery.trim().toLocaleLowerCase("da");
-  const selectableFields = fields.filter((field) =>
-    field.key !== "message_open" && (!normalizedFieldQuery || field.label.toLocaleLowerCase("da").includes(normalizedFieldQuery)),
-  );
+  const selectableFields = fields.filter((field) => field.key !== "message_open");
+  const selectedField = fieldChoice === "message_open"
+    ? { key: "message_open" as const, label: "Message open", options: [] }
+    : selectableFields.find((field) => field.key + ":" + (field.attributeKey ?? "") === fieldChoice);
 
   return (
     <Card>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-heading">Panelistvælger</p>
-          <p className="mt-1 text-xs text-muted">Byg én eller flere filtergrupper. Grupper kombineres med AND.</p>
+          <p className="text-sm font-semibold text-heading">Panelist selector</p>
+          <p className="mt-1 text-xs text-muted">Build one or more filter groups. Groups combine with AND.</p>
         </div>
         <Button type="button" variant="secondary" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
           <span aria-hidden>⌘</span> Filter panelists
@@ -158,32 +161,19 @@ export function PanelFilterPanel({
       <div className="mt-4 grid grid-cols-3 gap-2 sm:gap-3">
         <div className="rounded-xl border border-line bg-surface px-3 py-3"><p className="text-[11px] uppercase tracking-wide text-muted">panelists</p><p className="mt-1 text-xl font-semibold text-heading">{total}</p></div>
         <div className="rounded-xl border border-line bg-surface px-3 py-3"><p className="text-[11px] uppercase tracking-wide text-muted">filtered</p><p className="mt-1 text-xl font-semibold text-heading">{filtered === null ? "-" : filtered}</p></div>
-        <div className="rounded-xl border border-line bg-surface px-3 py-3"><p className="text-[11px] uppercase tracking-wide text-muted">available</p><p className="mt-1 text-xl font-semibold text-heading">{available === null ? "-" : available}</p></div>
       </div>
 
       {open && (
         <form onSubmit={applyFilters} className="mt-4 max-h-[min(640px,70vh)] space-y-3 overflow-y-auto pr-1">
-          <Input
-            type="search"
-            value={fieldQuery}
-            onChange={(event) => setFieldQuery(event.target.value)}
-            placeholder="Søg efter filterfelt"
-            aria-label="Søg efter filterfelt"
-          />
-          <div className="flex flex-wrap gap-2">
-            {selectableFields.map((field) => {
-              const active = groups.some((group) => group.field === field.key && (field.key !== "custom" || group.key === field.attributeKey));
-              return (
-                <Button key={`${field.key}:${field.attributeKey ?? ""}`} type="button" size="sm" variant={active ? "secondary" : "ghost"} onClick={() => addGroup(field)}>
-                  + {field.label} {active && <Badge tone="blue">ACTIVE</Badge>}
-                </Button>
-              );
-            })}
-            {messages.length > 0 && (!normalizedFieldQuery || "message open".includes(normalizedFieldQuery)) && (
-              <Button type="button" size="sm" variant={groups.some((group) => group.field === "message_open") ? "secondary" : "ghost"} onClick={() => addGroup({ key: "message_open", label: "Message open", options: [] })}>
-                + Message open {groups.some((group) => group.field === "message_open") && <Badge tone="blue">ACTIVE</Badge>}
-              </Button>
-            )}
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="min-w-0 flex-1 text-xs font-medium text-heading">Add filter
+              <Select className="mt-1 w-full" value={fieldChoice} onChange={(event) => setFieldChoice(event.target.value)} aria-label="Filter field">
+                <option value="">Choose a filter field…</option>
+                {selectableFields.map((field) => <option key={field.key + ":" + (field.attributeKey ?? "")} value={field.key + ":" + (field.attributeKey ?? "")}>{field.label}</option>)}
+                {messages.length > 0 && <option value="message_open">Message open</option>}
+              </Select>
+            </label>
+            <Button type="button" size="sm" variant="secondary" disabled={!selectedField} onClick={() => { if (selectedField) addGroup(selectedField); setFieldChoice(""); }}>Add filter</Button>
           </div>
 
           {groups.map((group) => {
@@ -199,14 +189,14 @@ export function PanelFilterPanel({
                 {group.field === "age" ? (
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     <label className="text-xs font-medium text-heading">
-                      Fra og med
+                      From age
                       <Input className="mt-1" type="number" min={0} max={120} value={group.values[0] ?? ""} onChange={(event) => updateGroup(group.id, { values: [event.target.value, group.values[1] ?? ""] })} />
                     </label>
                     <label className="text-xs font-medium text-heading">
-                      Til og med
+                      To age
                       <Input className="mt-1" type="number" min={0} max={120} value={group.values[1] ?? ""} onChange={(event) => updateGroup(group.id, { values: [group.values[0] ?? "", event.target.value] })} />
                     </label>
-                    <p className="text-xs text-muted sm:col-span-2">Alder beregnes omtrentligt fra fødselsår. Fødselsdato findes ikke i panelets datamodel.</p>
+                    <p className="text-xs text-muted sm:col-span-2">Age is estimated from birth year. Date of birth is not part of the panel data model.</p>
                   </div>
                 ) : (
                   <>
@@ -243,10 +233,10 @@ export function PanelFilterPanel({
             );
           })}
 
-          {groups.length === 0 && <p className="rounded-xl border border-dashed border-line px-4 py-5 text-sm text-muted">Tilføj Uddannelse, Opvarmningskilde, et panelspørgsmål, tags, kunderelation eller Message open.</p>}
+          {groups.length === 0 && <p className="rounded-xl border border-dashed border-line px-4 py-5 text-sm text-muted">Add Education, Heating source, a custom field, tags, Customer relation or Message open.</p>}
           <div className="flex flex-wrap items-center gap-2 pt-1">
-            <Button type="submit" variant="primary" disabled={!panelUrl || pending}>{pending ? "Opdaterer…" : "Anvend filtre"}</Button>
-            {groups.length > 0 && <Badge tone="blue">{groups.length} filtergruppe{groups.length === 1 ? "" : "r"}</Badge>}{pending && <span className="text-xs text-muted">Tællere og tabel opdateres…</span>}
+            <Button type="submit" variant="primary" disabled={!panelUrl || pending}>{pending ? "Updating…" : "Apply filters"}</Button>
+            {groups.length > 0 && <Badge tone="blue">{groups.length} filter group{groups.length === 1 ? "" : "s"}</Badge>}{pending && <span className="text-xs text-muted">Counts and table are updating…</span>}
           </div>
         </form>
       )}

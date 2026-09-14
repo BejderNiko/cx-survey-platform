@@ -107,9 +107,10 @@ export function SurveyRenderer({
   );
 
   const answerValue = current ? answers[current.code] : undefined;
-  const currentContext = current
+  const contextCandidate = current
     ? current.contextOverride === undefined ? definition.contextStimulus : current.contextOverride
     : undefined;
+  const currentContext = contextCandidate?.enabled === true ? contextCandidate : undefined;
 
 
   function isAnswered(q: Question, v: unknown): boolean {
@@ -213,7 +214,8 @@ export function SurveyRenderer({
               <img
                 src={stimulusUrl(currentContext, assetToken)}
                 alt={currentContext.altText}
-                className="max-h-[70vh] w-full max-w-full object-contain"
+                style={{ width: (currentContext.displayWidthPercent ?? 100) + "%" }}
+                className="max-h-[70vh] max-w-full object-contain"
               />
             </figure>
           )}
@@ -310,6 +312,8 @@ function OptionList({
   question: Question; locale: Locale; value: unknown; onChange: (v: unknown) => void; multi: boolean;
 }) {
   const selected = multi ? ((value as string[]) ?? []) : value;
+  const limit = multi ? question.multipleSelectLimit : undefined;
+  const [limitMessage, setLimitMessage] = useState(false);
   return (
     <div className="space-y-1.5">
       {(question.options ?? []).map((opt) => {
@@ -329,6 +333,11 @@ function OptionList({
               onChange={() => {
                 if (multi) {
                   const arr = selected as string[];
+                  if (!checked && limit !== undefined && arr.length >= limit) {
+                    setLimitMessage(true);
+                    return;
+                  }
+                  setLimitMessage(false);
                   onChange(checked ? arr.filter((x) => x !== opt.id) : [...arr, opt.id]);
                 } else {
                   onChange(opt.id);
@@ -339,6 +348,8 @@ function OptionList({
           </label>
         );
       })}
+      {limit !== undefined && <p className="text-xs text-muted">{locale === "da" ? `Vælg højst ${limit} svar.` : `Choose up to ${limit} options.`}</p>}
+      {limitMessage && <p role="alert" className="text-xs text-danger">{locale === "da" ? `Du kan højst vælge ${limit} svar.` : `You can choose at most ${limit} options.`}</p>}
     </div>
   );
 }
@@ -610,14 +621,14 @@ function FirstClickImage({
   const [display, setDisplay] = useState<{ x: number; y: number } | null>(null);
 
   return (
-    <div className="relative inline-block max-w-full">
+    <div className="relative block w-full">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         ref={imgRef}
         src={imageUrl}
         alt={altText}
         style={{ width: `${displayWidthPercent ?? 100}%` }}
-        className="max-w-full cursor-crosshair rounded-md border border-line"
+        className="block max-w-full cursor-crosshair rounded-md border border-line"
         onClick={(e) => {
           const img = imgRef.current;
           if (!img) return;
@@ -727,7 +738,7 @@ function PreferenceInput({
 
 function QuestionMedia({ question, assetToken }: { question: Question; assetToken?: string }) {
   if (["first_click", "preference_test", "prototype_test"].includes(question.type)) return null;
-  const stimuli = question.stimuli ?? [];
+  const stimuli = (question.stimuli ?? []).filter((asset) => asset.enabled === true);
   if (stimuli.length === 0) return null;
   return (
     <div className="mt-3 space-y-3" aria-label="Question image">

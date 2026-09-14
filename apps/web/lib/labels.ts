@@ -45,7 +45,6 @@ export const RESPONSE_STATUS: Record<string, string> = {
 export const CHANNEL: Record<string, string> = {
   link: "Link",
   email: "E-mail",
-  qr: "QR-kode",
   trigger: "Trigger",
 };
 

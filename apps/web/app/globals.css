@@ -1,29 +1,24 @@
 @import "tailwindcss";
 
-/*
- * OK CX platform — designtokens.
- * Varm, rolig flade (creme-baggrund, dyb petroleumsgrøn accent, serif-
- * displayfont til overskrifter). Accentværdierne udskiftes, når officielle
- * OK-designtokens foreligger.
- */
+/* OK CX platform tokens. Based on OK corporate reference deck: red, deep burgundy and warm off-white. */
 :root {
-  --background: #f6f4f0;
-  --surface: #ffffff;
-  --surface-raised: #fbfaf7;
-  --foreground: #23302e;
-  --heading: #123332;
-  --muted: #67736f;
-  --border: #e5e1d8;
-  --border-strong: #d4cfc3;
-  --accent: #0c6b62;
-  --accent-hover: #0a564f;
-  --accent-soft: #e2eeeb;
-  --accent-wash: #f0f6f4;
-  --danger: #b3372e;
-  --warning: #9a6b0c;
-  --success: #1a7f4f;
-  --shadow-card: 0 1px 2px rgb(28 40 38 / 0.05);
-  --shadow-pop: 0 4px 16px -4px rgb(28 40 38 / 0.12);
+  --background: #f7efeb;
+  --surface: #fefcfa;
+  --surface-raised: #ffffff;
+  --foreground: #4d433e;
+  --heading: #460019;
+  --muted: #6e6f73;
+  --border: #e6d9d2;
+  --border-strong: #bfb2aa;
+  --accent: #ff3c3c;
+  --accent-hover: #8c0000;
+  --accent-soft: #fde0dc;
+  --accent-wash: #fff7f4;
+  --danger: #8c0000;
+  --warning: #9b6500;
+  --success: #287653;
+  --shadow-card: 0 1px 2px rgb(70 0 25 / 0.06);
+  --shadow-pop: 0 8px 24px -8px rgb(70 0 25 / 0.2);
 }
 
 @theme inline {
@@ -42,8 +37,8 @@
   --color-danger: var(--danger);
   --color-warning: var(--warning);
   --color-success: var(--success);
-  --font-sans: "Segoe UI", system-ui, sans-serif;
-  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, Cambria, serif;
+  --font-sans: Arial, "Segoe UI", system-ui, sans-serif;
+  --font-display: Georgia, "Times New Roman", serif;
   --font-mono: "Cascadia Mono", ui-monospace, monospace;
   --shadow-card: var(--shadow-card);
   --shadow-pop: var(--shadow-pop);

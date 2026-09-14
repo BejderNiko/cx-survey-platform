@@ -1,18 +1,16 @@
 import { notFound } from "next/navigation";
-import QRCode from "qrcode";
 import { can } from "@ok/domain";
 import { Badge, Card, KpiTile, Table, Td, Th } from "@/components/ui";
 import { requireSession } from "@/lib/auth";
 import { withUser } from "@/lib/db";
 import { env } from "@/lib/env";
 import { fmtDateTime } from "@/lib/format";
-import { DISTRIBUTION_KIND, INVITATION_STATUS, OUTBOX_STATUS, label } from "@/lib/labels";
+import { DISTRIBUTION_KIND, INVITATION_STATUS, label } from "@/lib/labels";
 import { getPanelFilterUiData } from "@/lib/data/panel-filter-ui";
 import { CreateDistributionForms } from "./distribution-forms";
-import { OutboxMessageView } from "./outbox-message";
 import { CopyLinkButton } from "./copy-link-button";
 
-/** Udsend-fanen: links, panelinvitationer, leveringstragt og simuleret udbakke. */
+/** Udsend-fanen: links, panelinvitationer, leveringstragt og målgruppe-preview. */
 export default async function StudyDistributionPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   const { id } = await params;
@@ -20,7 +18,7 @@ export default async function StudyDistributionPage({ params }: { params: Promis
   const data = await withUser(session.userId, session.orgId, async (tx) => {
     const [study] = await tx`select id, status from studies where id = ${id} and org_id = ${session.orgId}`;
     if (!study) return null;
-    const [distributions, funnel, outbox, segments, panelFilterUi] = await Promise.all([
+    const [distributions, funnel, segments, panelFilterUi] = await Promise.all([
       tx`select d.id, d.kind, d.name, d.status, d.public_token, d.audience_snapshot, d.created_at,
                 (select count(*) from invitations i where i.distribution_id = d.id and i.org_id = ${session.orgId}) as invitations,
                 (select count(*) from responses r where r.distribution_id = d.id and r.org_id = ${session.orgId} and r.status = 'completed') as completed
@@ -28,30 +26,23 @@ export default async function StudyDistributionPage({ params }: { params: Promis
       tx`select i.status::text, count(*)::int as count
          from invitations i join distributions d on d.id = i.distribution_id and d.org_id = ${session.orgId}
          where d.study_id = ${id} and i.org_id = ${session.orgId} group by i.status`,
-      tx`select o.id, o.to_address, o.subject, o.body, o.status, o.created_at, d.name as distribution
-         from outbox_messages o join distributions d on d.id = o.distribution_id and d.org_id = ${session.orgId}
-         where d.study_id = ${id} and o.org_id = ${session.orgId}
-         order by o.created_at desc limit 50`,
       tx`select id, name from segments where org_id = ${session.orgId} order by name`,
       getPanelFilterUiData(tx, session.orgId),
     ]);
-    return { study, distributions, funnel, outbox, segments, panelFilterUi };
+    return { study, distributions, funnel, segments, panelFilterUi };
   });
   if (!data) notFound();
 
   const funnelMap = new Map(data.funnel.map((f) => [f.status as string, Number(f.count)]));
   const stages = ["sent", "opened", "clicked", "started", "completed", "bounced"];
 
-  const publicLinks = await Promise.all(
-    data.distributions
-      .filter((d) => d.public_token)
-      .map(async (d) => ({
-        id: d.id as string,
-        url: `${env.appBaseUrl}/s/${d.public_token}`,
-        qr: await QRCode.toDataURL(`${env.appBaseUrl}/s/${d.public_token}`, { width: 96, margin: 1 }),
-      })),
-  );
-  const qrById = new Map(publicLinks.map((p) => [p.id, p]));
+  const publicLinks = data.distributions
+    .filter((d) => d.public_token)
+    .map((d) => ({
+      id: d.id as string,
+      url: env.appBaseUrl + "/s/" + d.public_token,
+    }));
+  const publicLinkById = new Map(publicLinks.map((p) => [p.id, p]));
 
   const hasInvites = data.distributions.some((d) => d.kind === "panel_invite");
 
@@ -80,7 +71,7 @@ export default async function StudyDistributionPage({ params }: { params: Promis
             </thead>
             <tbody>
               {data.distributions.map((d) => {
-                const pub = qrById.get(d.id as string);
+                const pub = publicLinkById.get(d.id as string);
                 const snap = (d.audience_snapshot ?? {}) as { panelistIds?: string[]; seed?: number | null; method?: string };
                 return (
                   <tr key={d.id}>
@@ -104,11 +95,9 @@ export default async function StudyDistributionPage({ params }: { params: Promis
                         <span className="flex items-center gap-2">
                           <a href={pub.url} target="_blank" rel="noreferrer" className="text-xs text-accent underline break-all">{pub.url}</a>
                           <CopyLinkButton url={pub.url} />
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={pub.qr} alt={`QR-kode til ${d.name}`} width={48} height={48} />
                         </span>
                       ) : (
-                        <span className="text-xs text-muted">se udbakken nedenfor</span>
+                        <span className="text-xs text-muted">Ikke tilgængeligt</span>
                       )}
                     </Td>
                   </tr>
@@ -130,31 +119,6 @@ export default async function StudyDistributionPage({ params }: { params: Promis
         )}
       </Card>
 
-      <Card title="Simuleret udbakke (seneste 50)">
-        <p className="mb-3 text-xs text-muted">
-          Udviklingsmiljø: beskeder registreres her i stedet for at blive sendt. En rigtig
-          e-mail-/SMS-leverandør er en senere, konfigurationsstyret milepæl.
-        </p>
-        <Table>
-          <thead>
-            <tr><Th>Til</Th><Th>Emne</Th><Th>Udsendelse</Th><Th>Status</Th><Th>Oprettet</Th><Th /></tr>
-          </thead>
-          <tbody>
-            {data.outbox.map((m) => (
-              <OutboxMessageView
-                key={m.id}
-                to={m.to_address as string}
-                subject={m.subject as string}
-                body={m.body as string}
-                distribution={(m.distribution as string) ?? "—"}
-                status={label(OUTBOX_STATUS, m.status as string)}
-                createdAt={fmtDateTime(m.created_at)}
-              />
-            ))}
-            {data.outbox.length === 0 && <tr><Td colSpan={6} className="text-muted">Udbakken er tom.</Td></tr>}
-          </tbody>
-        </Table>
-      </Card>
     </div>
   );
 }

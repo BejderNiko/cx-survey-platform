@@ -7,6 +7,14 @@ import { adminSql } from "../db";
  * that token belongs to. Authenticated app code never goes through here.
  */
 
+const NATIVE_RECRUITMENT_QUESTIONS: Record<string, { label: string; fieldType: string; options: string[] }> = {
+  age: { label: "Age", fieldType: "number", options: [] },
+  uddannelse: { label: "Education", fieldType: "select", options: ["Folkeskole", "Studentereksamen", "Erhvervsfaglig", "Kort videregående under 3 år", "Mellemlang videregående 3-4 år", "Lang videregående over 4 år", "Ønsker ikke at oplyse"] },
+  opvarmningskilde: { label: "Heating source", fieldType: "select", options: ["Pillefyr", "Elvarme", "Varmepumpe", "Fjernvarme", "Jordvarme", "Solvarme", "Brændeovn", "Oliefyr", "Naturgas", "Bioenergi"] },
+  customer_status: { label: "Customer relation", fieldType: "select", options: ["customer", "former", "prospect", "member"] },
+  tag: { label: "Tags", fieldType: "select", options: [] },
+};
+
 export interface RecruitmentQuestion {
   id: string;
   key: string;
@@ -15,6 +23,8 @@ export interface RecruitmentQuestion {
   options: string[];
   required: boolean;
   position: number;
+  sourceKey: string | null;
+  customFieldId: string | null;
 }
 
 export interface PublicRecruitmentPage {
@@ -47,10 +57,12 @@ export async function getRecruitmentPage(token: string): Promise<PublicRecruitme
     from recruitment_pages where public_token = ${token} and is_active`;
   if (!page) return null;
   const questions = await adminSql`
-    select cf.id, cf.key, cf.label, cf.field_type, cf.options, rpq.required, rpq.position
-    from recruitment_page_questions rpq join custom_fields cf on cf.id = rpq.custom_field_id
+    select rpq.id as question_id, rpq.source_key, cf.id, cf.key, cf.label, cf.field_type, cf.options, rpq.required, rpq.position
+    from recruitment_page_questions rpq left join custom_fields cf on cf.id = rpq.custom_field_id
     where rpq.recruitment_page_id = ${page.id}
     order by rpq.position`;
+  const tagRows = await adminSql`select name from tags where org_id = ${page.org_id} order by name`;
+  const tagOptions = tagRows.map((row) => String(row.name));
   return {
     id: page.id as string,
     orgId: page.org_id as string,
@@ -69,15 +81,15 @@ export async function getRecruitmentPage(token: string): Promise<PublicRecruitme
     screeningContinueLabel: page.screening_continue_label as string,
     screeningEndLabel: page.screening_end_label as string,
     screeningEndContent: page.screening_end_content as string,
-    questions: questions.map((q) => ({
-      id: q.id as string,
-      key: q.key as string,
-      label: q.label as string,
-      fieldType: q.field_type as string,
-      options: (q.options ?? []) as string[],
-      required: q.required as boolean,
-      position: q.position as number,
-    })),
+    questions: questions.map((q) => {
+      const sourceKey = q.source_key as string | null;
+      const native = sourceKey ? NATIVE_RECRUITMENT_QUESTIONS[sourceKey] : undefined;
+      return {
+        id: q.question_id as string, key: String(sourceKey ?? q.key ?? ""), label: String(q.label ?? native?.label ?? q.key ?? "Question"),
+        fieldType: String(q.field_type ?? native?.fieldType ?? "text"), options: (sourceKey === "tag" ? tagOptions : (q.options ?? native?.options ?? [])) as string[],
+        required: q.required as boolean, position: q.position as number, sourceKey, customFieldId: q.id as string | null,
+      };
+    }),
   };
 }
 
@@ -85,7 +97,7 @@ export interface SubmitRecruitmentInput {
   token: string;
   firstName: string;
   email: string;
-  answers: Record<string, unknown>; // custom_field id -> raw answer
+  answers: Record<string, unknown>; // recruitment question id -> raw answer
 }
 
 function normalizeAnswer(
@@ -102,6 +114,7 @@ function normalizeAnswer(
     case "number": {
       const n = Number(raw);
       if (!Number.isFinite(n)) return { ok: false, error: `'${question.label}' skal være et tal.` };
+      if (question.sourceKey === "age" && (!Number.isInteger(n) || n < 0 || n > 120)) return { ok: false, error: `'${question.label}' skal være mellem 0 og 120.` };
       return { ok: true, value: n };
     }
     case "boolean":
@@ -147,20 +160,20 @@ export async function submitRecruitment(
     if (!page) return { ok: false, error: "unknown_token" };
 
     const questions = await tx`
-      select cf.id, cf.key, cf.label, cf.field_type, cf.options, rpq.required, rpq.position
-      from recruitment_page_questions rpq join custom_fields cf on cf.id = rpq.custom_field_id
+      select rpq.id as question_id, rpq.source_key, cf.id, cf.key, cf.label, cf.field_type, cf.options, rpq.required, rpq.position
+      from recruitment_page_questions rpq left join custom_fields cf on cf.id = rpq.custom_field_id
       where rpq.recruitment_page_id = ${page.id}`;
 
-    const normalized: { fieldId: string; value: unknown }[] = [];
+    const normalized: { fieldId: string | null; sourceKey: string | null; value: unknown }[] = [];
     for (const q of questions) {
       const question: RecruitmentQuestion = {
-        id: q.id as string, key: q.key as string, label: q.label as string,
-        fieldType: q.field_type as string, options: (q.options ?? []) as string[],
-        required: q.required as boolean, position: q.position as number,
+        id: q.question_id as string, key: String(q.source_key ?? q.key ?? ""), label: String(q.label ?? NATIVE_RECRUITMENT_QUESTIONS[String(q.source_key ?? "")]?.label ?? q.key ?? "Question"),
+        fieldType: String(q.field_type ?? NATIVE_RECRUITMENT_QUESTIONS[String(q.source_key ?? "")]?.fieldType ?? "text"), options: (q.options ?? NATIVE_RECRUITMENT_QUESTIONS[String(q.source_key ?? "")]?.options ?? []) as string[],
+        required: q.required as boolean, position: q.position as number, sourceKey: q.source_key as string | null, customFieldId: q.id as string | null,
       };
       const result = normalizeAnswer(question, input.answers[question.id]);
       if (!result.ok) return { ok: false, error: result.error };
-      if (result.value !== null) normalized.push({ fieldId: question.id, value: result.value });
+      if (result.value !== null) normalized.push({ fieldId: question.customFieldId ?? null, sourceKey: question.sourceKey, value: result.value });
     }
 
     const [existing] = await tx`select id from panelists where org_id = ${page.org_id} and email = ${email}`;
@@ -188,9 +201,22 @@ export async function submitRecruitment(
     }
 
     for (const a of normalized) {
-      await tx`insert into panelist_attributes (panelist_id, field_id, org_id, value)
-               values (${panelistId}, ${a.fieldId}, ${page.org_id}, ${tx.json(a.value as never)})
-               on conflict (panelist_id, field_id) do update set value = excluded.value, updated_at = now()`;
+      if (a.sourceKey === "age") {
+        await tx`update panelists set birth_year = ${new Date().getFullYear() - Number(a.value)}, updated_at = now() where id = ${panelistId}`;
+      } else if (a.sourceKey === "customer_status") {
+        await tx`update panelists set customer_status = ${String(a.value)}, updated_at = now() where id = ${panelistId}`;
+      } else if (a.sourceKey === "tag") {
+        const [tag] = await tx`insert into tags (org_id, name) values (${page.org_id}, ${String(a.value)}) on conflict (org_id, name) do update set name = excluded.name returning id`;
+        await tx`insert into panelist_tags (panelist_id, tag_id, org_id) values (${panelistId}, ${tag.id}, ${page.org_id}) on conflict do nothing`;
+      } else if (a.fieldId || a.sourceKey) {
+        let fieldId = a.fieldId;
+        if (!fieldId && a.sourceKey) {
+          const native = NATIVE_RECRUITMENT_QUESTIONS[a.sourceKey];
+          const [field] = await tx`insert into custom_fields (org_id, key, label, field_type, options) values (${page.org_id}, ${a.sourceKey}, ${native?.label ?? a.sourceKey}, ${native?.fieldType ?? "text"}, ${tx.json((native?.options ?? []) as never)}) on conflict (org_id, key) do update set label = excluded.label returning id`;
+          fieldId = field.id as string;
+        }
+        if (fieldId) await tx`insert into panelist_attributes (panelist_id, field_id, org_id, value) values (${panelistId}, ${fieldId}, ${page.org_id}, ${tx.json(a.value as never)}) on conflict (panelist_id, field_id) do update set value = excluded.value, updated_at = now()`;
+      }
     }
 
     await tx`insert into recruitment_submissions (org_id, recruitment_page_id, panelist_id)

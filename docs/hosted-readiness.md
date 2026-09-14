@@ -13,7 +13,7 @@ Code cannot guarantee 100% uptime. Availability depends on Vercel, Supabase, ana
 - Analytics: FastAPI deployment over HTTPS.
 - Local-only database: PGlite. Hosted Preview/Production rejects PGlite and loopback targets.
 
-`GET /api/health/readiness` returns only readiness booleans. It checks mandatory hosted configuration, database connectivity, and protected analytics details. It returns HTTP 503 if any dependency is unavailable. It never returns connection strings, keys, host details, or exception text.
+`GET /api/health/readiness` returns readiness booleans. It checks hosted configuration, database connectivity, and protected analytics details. Top-level status is `ready`, `degraded`, or `not_ready`. `database.ready` and `database.studiesReady` cover study core access. `database.complete` additionally requires section-scoped comments and recruitment pages. A degraded response keeps study core available while naming missing additive schema capabilities. It returns HTTP 503 only when core dependencies are unavailable. It never returns connection strings, keys, host details, or exception text.
 
 ## Environment-variable roles
 

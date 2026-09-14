@@ -19,7 +19,11 @@ export default async function StudyPage({ params }: { params: Promise<{ id: stri
       tx`select v.id, v.version_number, v.published_at, coalesce(u.full_name, 'Tidligere bruger') as publisher
          from study_versions v left join users u on u.id = v.published_by
          where v.study_id = ${id} and v.org_id = ${session.orgId} order by v.version_number desc`,
-      tx`select c.id, c.parent_id, c.question_code, c.body, c.status,
+      tx`select c.id, c.parent_id,
+             case when c.question_code like '__section__:%' then null else c.question_code end as question_code,
+             case when to_jsonb(c)->>'section_id' is not null then to_jsonb(c)->>'section_id'
+                  when c.question_code like '__section__:%' then substring(c.question_code from 12)
+                  else null end as section_id, c.body, c.status,
                 c.created_at::text, c.resolved_at::text, coalesce(u.full_name, 'Tidligere bruger') as author,
                 resolver.full_name as resolved_by_name
          from comments c
@@ -48,7 +52,6 @@ export default async function StudyPage({ params }: { params: Promise<{ id: stri
           status={study.status}
           canPublish={can(session.role, "studies.publish")}
           canClose={can(session.role, "studies.close")}
-          canCreate={can(session.role, "studies.create")}
           canDelete={can(session.role, "studies.delete")}
         />
         {can(session.role, "studies.edit") && (
@@ -87,7 +90,7 @@ export default async function StudyPage({ params }: { params: Promise<{ id: stri
           )}
         </Card>
 
-        <Card title="Kommentarer">
+        <Card title="Comments">
           <CommentsPanel
             studyId={id}
             comments={data.comments as unknown as StudyCommentRow[]}

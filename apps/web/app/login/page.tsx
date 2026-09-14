@@ -52,15 +52,17 @@ export default async function LoginPage({
             </Button>
           </form>
         </Card>
-        <div className="mt-4 rounded-xl border border-line bg-surface px-3 py-2 text-xs text-muted">
-          <p className="font-medium text-foreground mb-1">Login til lokal udvikling</p>
-          <p>
-            Seedede brugere: owner@, admin@, researcher@, panel@, analyst@, viewer@
-            (alle <span className="font-mono">…@example.invalid</span>, adgangskode{" "}
-            <span className="font-mono">demo1234!</span>).
-          </p>
-          <p className="mt-1">Produktionslogin sker via Microsoft Entra ID gennem Supabase Auth (ikke aktiveret i lokal udvikling).</p>
-        </div>
+        {!process.env.VERCEL && process.env.NODE_ENV !== "production" && (
+          <div className="mt-4 rounded-xl border border-line bg-surface px-3 py-2 text-xs text-muted">
+            <p className="font-medium text-foreground mb-1">Login til lokal udvikling</p>
+            <p>
+              Seedede brugere: owner@, admin@, researcher@, panel@, analyst@, viewer@
+              (alle <span className="font-mono">…@example.invalid</span>, adgangskode{" "}
+              <span className="font-mono">[local seed password]</span>).
+            </p>
+            <p className="mt-1">Produktionslogin sker via Microsoft Entra ID gennem Supabase Auth (ikke aktiveret i lokal udvikling).</p>
+          </div>
+        )}
       </div>
     </main>
   );
