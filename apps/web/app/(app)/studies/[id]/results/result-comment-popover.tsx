@@ -8,11 +8,13 @@ export function ResultCommentPopover({
   questionCode,
   comments,
   canResolve,
+  currentUserId,
 }: {
   studyId: string;
   questionCode: string;
   comments: StudyCommentRow[];
   canResolve: boolean;
+  currentUserId: string;
 }) {
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const count = comments.filter((comment) => comment.question_code === questionCode).length;
@@ -31,7 +33,7 @@ export function ResultCommentPopover({
         Comment{count > 0 ? " · " + count : ""}
       </summary>
       <div className="absolute right-0 top-8 z-50 w-[min(440px,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl">
-        <CommentsPanel studyId={studyId} comments={comments} questionCode={questionCode} canResolve={canResolve} />
+        <CommentsPanel studyId={studyId} comments={comments} questionCode={questionCode} canResolve={canResolve} currentUserId={currentUserId} />
       </div>
     </details>
   );

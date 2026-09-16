@@ -31,36 +31,36 @@ export function StudyActions({
                 setProblems(res.problems);
               } else {
                 setProblems([]);
-                setMsg(`Version ${res.version} er publiceret. Studiet er i gang.`);
+                setMsg(`Version ${res.version} published. Study is live.`);
               }
             })
           }
         >
-          {status === "live" ? "Publicér ny version" : "Publicér"}
+          {status === "live" ? "Publish new version" : "Publish"}
         </Button>
       )}
       {canClose && status === "live" && (
         <Button variant="secondary" disabled={pending}
           onClick={() => startTransition(() => setStudyStatus(studyId, "paused"))}>
-          Sæt på pause
+          Pause
         </Button>
       )}
       {canClose && ["live", "paused"].includes(status) && (
         <Button variant="secondary" disabled={pending}
           onClick={() => startTransition(() => setStudyStatus(studyId, "closed"))}>
-          Afslut
+          Close
         </Button>
       )}
       {canClose && status === "paused" && (
         <Button variant="secondary" disabled={pending}
           onClick={() => startTransition(() => setStudyStatus(studyId, "live"))}>
-          Genoptag
+          Resume
         </Button>
       )}
       {canClose && status !== "archived" && (
         <Button variant="secondary" disabled={pending}
           onClick={() => startTransition(() => setStudyStatus(studyId, "archived"))}>
-          Arkivér
+          Archive
         </Button>
       )}
       {canDelete && (
@@ -68,7 +68,7 @@ export function StudyActions({
           variant="secondary"
           disabled={pending}
           onClick={() => {
-            if (!window.confirm("Slet denne kladde permanent? Handlingen kan ikke fortrydes.")) return;
+            if (!window.confirm("Delete this study permanently? This action cannot be undone.")) return;
             startTransition(async () => {
               setActionError(null);
               const res = await deleteStudy(studyId);
@@ -81,7 +81,7 @@ export function StudyActions({
             });
           }}
         >
-          Slet studie
+          Delete study
         </Button>
       )}
       {actionError && (
@@ -92,7 +92,7 @@ export function StudyActions({
       {msg && <span className="text-sm text-success">{msg}</span>}
       {problems.length > 0 && (
         <div role="alert" className="w-full rounded-lg border border-danger/30 bg-red-50 px-3 py-2 text-sm text-danger">
-          <p className="font-medium">Kan ikke publicere:</p>
+          <p className="font-medium">Cannot publish:</p>
           <ul className="list-disc pl-5">{problems.map((p, i) => <li key={i}>{p}</li>)}</ul>
         </div>
       )}

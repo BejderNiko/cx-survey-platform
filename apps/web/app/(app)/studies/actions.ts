@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import {
   METRIC_DEFINITIONS,
+  AUTHORING_QUESTION_TYPES,
   INCOMPLETE_LOGIC_CONDITION_MESSAGE,
   allQuestions,
   instrumentDefinition,
@@ -16,6 +17,7 @@ import { env } from "@/lib/env";
 import { issueDraftPreviewToken } from "@/lib/preview-token";
 import { audit } from "@/lib/audit";
 import { deleteStimulusObjectWithRetry } from "@/lib/stimulus-storage";
+import { generateLocalSurveyDraft } from "@/lib/survey-draft";
 
 const SECTION_COMMENT_PREFIX = "__section__:";
 
@@ -37,14 +39,18 @@ export async function createStudy(input: {
     const [workspace] = await tx`
       select id from workspaces
       where id = ${input.workspaceId} and org_id = ${session.orgId}`;
-    if (!workspace) throw new Error("Workspacet blev ikke fundet.");
+    if (!workspace) throw new Error("Workspace was not found.");
 
     let definition: InstrumentDefinition = BLANK_SURVEY;
     let methodTags: string[] = [];
     if (input.templateId) {
       const [tpl] = await tx`select definition, category from templates where id = ${input.templateId}`;
       if (tpl) {
-        definition = toDanishDraft(instrumentDefinition.parse(tpl.definition));
+        const parsedTemplate = instrumentDefinition.parse(tpl.definition);
+        if (allQuestions(parsedTemplate).some((question) => !(AUTHORING_QUESTION_TYPES as readonly string[]).includes(question.type))) {
+          throw new Error("This template contains a retired question type and cannot be used for a new study.");
+        }
+        definition = toDanishDraft(parsedTemplate);
         const legacyTemplateMediaProblem = validateInstrument(definition).find((problem) => problem.includes("uses legacy imageUrl"));
         if (legacyTemplateMediaProblem) throw new Error(legacyTemplateMediaProblem);
         methodTags = [tpl.category as string];
@@ -74,7 +80,7 @@ export async function updateDraft(studyId: string, definitionRaw: unknown, title
     throw new Error(INCOMPLETE_LOGIC_CONDITION_MESSAGE);
   }
   const title = titleRaw?.trim();
-  if (titleRaw !== undefined && !title) throw new Error("Studienavn skal udfyldes.");
+  if (titleRaw !== undefined && !title) throw new Error("Study name is required.");
   const orgId = await withAuthorized("studies.edit", async (tx, session) => {
     const updated = title
       ? await tx`
@@ -87,7 +93,7 @@ export async function updateDraft(studyId: string, definitionRaw: unknown, title
           where id = ${studyId} and org_id = ${session.orgId}
             and status in ('draft','review','live','paused')
           returning id`;
-    if (updated.length !== 1) throw new Error("Studiet blev ikke fundet eller kan ikke redigeres.");
+    if (updated.length !== 1) throw new Error("Study was not found or cannot be edited.");
     return session.orgId;
   });
   revalidatePath(`/studies/${studyId}`);
@@ -101,7 +107,7 @@ export async function publishStudy(studyId: string) {
     const [study] = await tx`
       select draft_definition, status from studies
       where id = ${studyId} and org_id = ${session.orgId}`;
-    if (!study) throw new Error("Studiet blev ikke fundet");
+    if (!study) throw new Error("Study was not found.");
     const def = instrumentDefinition.parse(study.draft_definition);
     const problems = validateInstrument(def);
     if (problems.length > 0) return { ok: false as const, problems };
@@ -158,6 +164,22 @@ export type DeleteStudyResult =
   | { ok: true }
   | { ok: false; reason: string; canArchive: boolean };
 
+export async function generateSurveyDraft(studyId: string, brief: string) {
+  const exists = await withAuthorized("studies.edit", async (tx, session) => {
+    const [study] = await tx`
+      select id from studies
+      where id = ${studyId} and org_id = ${session.orgId}
+        and status in ('draft', 'review', 'live', 'paused')`;
+    return Boolean(study);
+  });
+  if (!exists) return { ok: false as const, error: "Study was not found or cannot be edited." };
+  try {
+    const generated = generateLocalSurveyDraft(brief);
+    return { ok: true as const, ...generated };
+  } catch (error) {
+    return { ok: false as const, error: error instanceof Error ? error.message : "Draft could not be generated." };
+  }
+}
 /** Hard-delete only dependency-free drafts. Everything else must be archived. */
 export async function deleteStudy(studyId: string): Promise<DeleteStudyResult> {
   const result = await withAuthorized("studies.delete", async (tx, session) => {
@@ -182,11 +204,11 @@ export async function deleteStudy(studyId: string): Promise<DeleteStudyResult> {
     }
 
     const dependencies = [
-      ["publicerede versioner", Number(study.versions)],
-      ["udsendelser", Number(study.distributions)],
-      ["besvarelser", Number(study.responses)],
-      ["opfølgningsregler", Number(study.followup_rules)],
-      ["datasæt", Number(study.datasets)],
+      ["published versions", Number(study.versions)],
+      ["distributions", Number(study.distributions)],
+      ["responses", Number(study.responses)],
+      ["follow-up rules", Number(study.followup_rules)],
+      ["datasets", Number(study.datasets)],
     ].filter(([, count]) => Number(count) > 0);
 
     if (study.status !== "draft" || dependencies.length > 0) {
@@ -194,8 +216,8 @@ export async function deleteStudy(studyId: string): Promise<DeleteStudyResult> {
       return {
         ok: false as const,
         reason: detail
-          ? `Studiet har afhængigheder (${detail}) og kan derfor kun arkiveres.`
-          : "Kun studier med status kladde kan slettes. Arkivér studiet i stedet.",
+          ? `Study has dependencies (${detail}) and can only be archived.`
+          : "Only draft studies can be deleted. Archive this study instead.",
         canArchive: true,
       };
     }
@@ -209,7 +231,7 @@ export async function deleteStudy(studyId: string): Promise<DeleteStudyResult> {
     await tx`delete from comments where org_id = ${session.orgId}
              and entity_type = 'study' and entity_id = ${studyId}`;
     const deleted = await tx`delete from studies where id = ${studyId} and org_id = ${session.orgId} returning id`;
-    if (deleted.length !== 1) throw new Error("Studiet kunne ikke slettes sikkert.");
+    if (deleted.length !== 1) throw new Error("Study could not be deleted safely.");
     return { ok: true as const, storageKeys: media.map((row) => String(row.storage_key)) };
   });
 
@@ -225,32 +247,6 @@ export async function deleteStudy(studyId: string): Promise<DeleteStudyResult> {
   }
   revalidatePath("/studies");
   return result.ok ? { ok: true } : result;
-}
-
-/** Duplicate a study without responses, distributions, or tokens. */
-export async function duplicateStudy(studyId: string) {
-  const newId = await withAuthorized("studies.create", async (tx, session) => {
-    const [src] = await tx`select title, workspace_id, study_type, method_tags, draft_definition, theme, settings
-                           from studies where id = ${studyId} and org_id = ${session.orgId}`;
-    if (!src) throw new Error("Studiet blev ikke fundet");
-    const draftDefinition = toDanishDraft(instrumentDefinition.parse(src.draft_definition));
-    const legacyCopyMediaProblem = validateInstrument(draftDefinition).find((problem) => problem.includes("uses legacy imageUrl"));
-    if (legacyCopyMediaProblem) throw new Error(legacyCopyMediaProblem);
-    const [copy] = await tx`
-      insert into studies (org_id, workspace_id, title, study_type, method_tags, status, owner_id,
-                           draft_definition, theme, settings)
-      values (${session.orgId}, ${src.workspace_id}, ${src.title + " (kopi)"}, ${src.study_type},
-              ${src.method_tags}, 'draft', ${session.userId}, ${tx.json(draftDefinition as never)},
-              ${tx.json(src.theme)}, ${tx.json(src.settings)})
-      returning id`;
-    await audit(tx, {
-      orgId: session.orgId, actorUserId: session.userId,
-      action: "study.duplicate", entityType: "study", entityId: copy.id as string,
-      details: { sourceStudyId: studyId },
-    });
-    return copy.id as string;
-  });
-  redirect(`/studies/${newId}/builder`);
 }
 
 export type CommentActionResult = { ok: true } | { ok: false; error: string };
@@ -341,6 +337,57 @@ export async function addStudyComment(input: {
   return result;
 }
 
+export async function updateStudyComment(commentId: string, bodyRaw: string): Promise<CommentActionResult> {
+  const body = bodyRaw.trim();
+  if (!body) return { ok: false, error: "Comment is empty." };
+  if (body.length > 4000) return { ok: false, error: "Comment must be 4,000 characters or fewer." };
+  const result = await withAuthorized("comments.create", async (tx, session) => {
+    const [comment] = await tx`
+      update comments
+      set body = ${body}
+      where id = ${commentId} and org_id = ${session.orgId}
+        and entity_type = 'study' and author_id = ${session.userId}
+      returning study_id`;
+    if (!comment) return { ok: false as const, error: "Only your own study comments can be edited." };
+    await audit(tx, {
+      orgId: session.orgId, actorUserId: session.userId, action: "comment.update",
+      entityType: "study", entityId: comment.study_id as string, details: { commentId },
+    });
+    return { ok: true as const, studyId: comment.study_id as string };
+  });
+  if (!result.ok) return result;
+  revalidatePath(`/studies/${result.studyId}`);
+  revalidatePath(`/studies/${result.studyId}/builder`);
+  return { ok: true };
+}
+
+export async function deleteStudyComment(commentId: string): Promise<CommentActionResult> {
+  const result = await withAuthorized("comments.create", async (tx, session) => {
+    const [comment] = await tx`
+      select study_id,
+             (select count(*)::int from comments reply where reply.parent_id = comments.id) as replies
+      from comments
+      where id = ${commentId} and org_id = ${session.orgId}
+        and entity_type = 'study' and author_id = ${session.userId}`;
+    if (!comment) return { ok: false as const, error: "Only your own study comments can be deleted." };
+    if (Number(comment.replies) > 0) return { ok: false as const, error: "Comments with replies cannot be deleted." };
+    const [deleted] = await tx`
+      delete from comments
+      where id = ${commentId} and org_id = ${session.orgId}
+        and entity_type = 'study' and author_id = ${session.userId}
+      returning study_id`;
+    if (!deleted) return { ok: false as const, error: "Comment was not found." };
+    await audit(tx, {
+      orgId: session.orgId, actorUserId: session.userId, action: "comment.delete",
+      entityType: "study", entityId: deleted.study_id as string, details: { commentId },
+    });
+    return { ok: true as const, studyId: deleted.study_id as string };
+  });
+  if (!result.ok) return result;
+  revalidatePath(`/studies/${result.studyId}`);
+  revalidatePath(`/studies/${result.studyId}/builder`);
+  return { ok: true };
+}
 export async function resolveStudyComment(commentId: string, resolved: boolean): Promise<CommentActionResult> {
   const result = await withAuthorized("comments.resolve", async (tx, session) => {
     const [comment] = await tx`

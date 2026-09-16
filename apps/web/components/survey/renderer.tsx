@@ -134,6 +134,14 @@ export function SurveyRenderer({
       };
       setAnswers(currentAnswers);
     }
+    if (current.type === "multiple_choice") {
+      const selected = currentAnswers[current.code];
+      const minimum = current.multipleSelectMinLimit;
+      if (minimum !== undefined && Array.isArray(selected) && selected.length > 0 && selected.length < minimum) {
+        setValidationMsg(locale === "da" ? `Vælg mindst ${minimum} svar.` : `Choose at least ${minimum} options.`);
+        return;
+      }
+    }
     if (current.required && !isAnswered(current, currentAnswers[current.code])) {
       setValidationMsg(locale === "da" ? "Dette spørgsmål skal besvares." : "This question requires an answer.");
       return;
@@ -313,6 +321,7 @@ function OptionList({
 }) {
   const selected = multi ? ((value as string[]) ?? []) : value;
   const limit = multi ? question.multipleSelectLimit : undefined;
+  const minimum = multi ? question.multipleSelectMinLimit : undefined;
   const [limitMessage, setLimitMessage] = useState(false);
   return (
     <div className="space-y-1.5">
@@ -348,7 +357,7 @@ function OptionList({
           </label>
         );
       })}
-      {limit !== undefined && <p className="text-xs text-muted">{locale === "da" ? `Vælg højst ${limit} svar.` : `Choose up to ${limit} options.`}</p>}
+      {(minimum !== undefined || limit !== undefined) && <p className="text-xs text-muted">{minimum !== undefined && limit !== undefined ? (locale === "da" ? `Vælg mellem ${minimum} og ${limit} svar.` : `Choose between ${minimum} and ${limit} options.`) : minimum !== undefined ? (locale === "da" ? `Vælg mindst ${minimum} svar.` : `Choose at least ${minimum} options.`) : (locale === "da" ? `Vælg højst ${limit} svar.` : `Choose up to ${limit} options.`)}</p>}
       {limitMessage && <p role="alert" className="text-xs text-danger">{locale === "da" ? `Du kan højst vælge ${limit} svar.` : `You can choose at most ${limit} options.`}</p>}
     </div>
   );

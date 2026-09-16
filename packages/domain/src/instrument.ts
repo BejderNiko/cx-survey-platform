@@ -54,7 +54,6 @@ export const QUESTION_TYPES = [
 export type QuestionType = (typeof QUESTION_TYPES)[number];
 
 export const AUTHORING_QUESTION_TYPES = [
-  "nps",
   "single_choice",
   "multiple_choice",
   "short_text",
@@ -63,7 +62,6 @@ export const AUTHORING_QUESTION_TYPES = [
   "rating",
   "likert",
   "ranking",
-  "first_click",
   "preference_test",
   "prototype_test",
 ] as const satisfies readonly QuestionType[];
@@ -104,7 +102,7 @@ export const stimulusAsset = z.object({
   id: z.string().min(1).max(100),
   assetId: z.string().uuid(),
   altText: z.string().trim().min(1).max(500),
-  enabled: z.boolean().optional(),
+  enabled: z.boolean().default(false),
   displayWidthPercent: z.number().int().min(20).max(100).optional(),
 });
 export type StimulusAsset = z.infer<typeof stimulusAsset>;
@@ -149,6 +147,7 @@ export const question = z.object({
   hidden: z.boolean().optional(),                  // excluded from participant preview/live flow
   options: z.array(option).optional(),          // choice / likert / ranking types
   randomizeOptions: z.boolean().optional(),
+  multipleSelectMinLimit: z.number().int().min(0).max(100).optional(),
   multipleSelectLimit: z.number().int().min(1).max(100).optional(),
   scale: z
     .object({
@@ -265,9 +264,19 @@ export function validateInstrument(def: InstrumentDefinition): string[] {
     if (needsOptions.includes(q.type) && (!q.options || q.options.length < 2)) {
       problems.push(`Question '${q.code}' needs at least two options.`);
     }
-    if (q.type === "multiple_choice" && q.multipleSelectLimit !== undefined
-      && q.options && q.multipleSelectLimit > q.options.length) {
-      problems.push("Question '" + q.code + "' select limit cannot exceed its option count.");
+    if (q.type === "multiple_choice") {
+      const optionCount = q.options?.length ?? 0;
+      const minLimit = q.multipleSelectMinLimit;
+      const maxLimit = q.multipleSelectLimit;
+      if (maxLimit !== undefined && maxLimit > optionCount) {
+        problems.push("Question '" + q.code + "' select limit cannot exceed its option count.");
+      }
+      if (minLimit !== undefined && minLimit > optionCount) {
+        problems.push("Question '" + q.code + "' minimum selection limit cannot exceed its option count.");
+      }
+      if (minLimit !== undefined && maxLimit !== undefined && minLimit > maxLimit) {
+        problems.push("Question '" + q.code + "' minimum selection limit cannot exceed its maximum selection limit.");
+      }
     }
     if (q.type === "matrix" && (!q.rows?.length || !q.options?.length)) {
       problems.push(`Matrix question '${q.code}' needs rows and columns.`);

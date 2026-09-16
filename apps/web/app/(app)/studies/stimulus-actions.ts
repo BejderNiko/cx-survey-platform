@@ -34,13 +34,13 @@ export async function uploadStimulus(studyId: string, formData: FormData): Promi
   const file = formData.get("file");
   const altText = String(formData.get("altText") ?? "").trim();
   const kind = String(formData.get("kind") ?? "preference");
-  if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Vælg en billedfil." };
-  if (!altText) return { ok: false, error: "Alt-tekst er påkrævet." };
-  if (altText.length > 300) return { ok: false, error: "Alt-tekst må højst være 300 tegn." };
+  if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Select an image file." };
+  if (!altText) return { ok: false, error: "Alt text is required." };
+  if (altText.length > 300) return { ok: false, error: "Alt text must be 300 characters or fewer." };
   const extension = ALLOWED_TYPES.get(file.type);
-  if (!extension) return { ok: false, error: "Brug PNG, JPEG eller WebP." };
-  if (file.size > MAX_STIMULUS_BYTES) return { ok: false, error: "Billedet må højst fylde 8 MB." };
-  if (!["context", "preference", "first_click", "prototype_frame"].includes(kind)) return { ok: false, error: "Ukendt stimulustype." };
+  if (!extension) return { ok: false, error: "Use PNG, JPEG, or WebP." };
+  if (file.size > MAX_STIMULUS_BYTES) return { ok: false, error: "Image must be 8 MB or smaller." };
+  if (!["context", "preference", "first_click", "prototype_frame"].includes(kind)) return { ok: false, error: "Unknown stimulus type." };
 
   const assetId = randomUUID();
   let storedKey: string | null = null;
@@ -48,10 +48,10 @@ export async function uploadStimulus(studyId: string, formData: FormData): Promi
   try {
     const asset = await withAuthorized("studies.edit", async (tx, session) => {
       const [study] = await tx`select id from studies where id = ${studyId} and org_id = ${session.orgId}`;
-      if (!study) throw new Error("Studiet blev ikke fundet.");
+      if (!study) throw new Error("Study was not found.");
       const bytes = new Uint8Array(await file.arrayBuffer());
       if (!matchesImageSignature(bytes, file.type)) {
-        validationError = "Filens indhold matcher ikke den valgte billedtype.";
+        validationError = "File content does not match the selected image type.";
         throw new Error("Stimulus file signature mismatch.");
       }
       const storageKey = `${session.orgId}/${studyId}/${assetId}.${extension}`;
@@ -69,11 +69,11 @@ export async function uploadStimulus(studyId: string, formData: FormData): Promi
         entityId: studyId,
         details: { assetId, kind, byteSize: file.size, contentType: file.type },
       });
-      return { id: assetId, assetId, altText } satisfies StimulusAsset;
+      return { id: assetId, assetId, altText, enabled: false } satisfies StimulusAsset;
     });
     return { ok: true, asset };
   } catch {
     if (storedKey) await deleteStimulusObject(storedKey).catch(() => undefined);
-    return { ok: false, error: validationError ?? "Billedet kunne ikke uploades. Prøv igen." };
+    return { ok: false, error: validationError ?? "Image could not be uploaded. Try again." };
   }
 }

@@ -27,7 +27,7 @@ export default async function BuilderPage({
              case when to_jsonb(c)->>'section_id' is not null then to_jsonb(c)->>'section_id'
                   when c.question_code like '__section__:%' then substring(c.question_code from 12)
                   else null end as section_id, c.body, c.status,
-             c.created_at::text, c.resolved_at::text, coalesce(u.full_name, 'Tidligere bruger') as author,
+             c.author_id, c.created_at::text, c.resolved_at::text, coalesce(u.full_name, 'Former user') as author,
              resolver.full_name as resolved_by_name
       from comments c
       left join users u on u.id = c.author_id
@@ -53,6 +53,7 @@ export default async function BuilderPage({
         initialDefinition={instrumentDefinition.parse(data.study.draft_definition)}
         initialComments={data.comments as unknown as StudyCommentRow[]}
         canResolveComments={can(session.role, "comments.resolve")}
+        currentUserId={session.userId}
         previewUrl={`${env.appBaseUrl}/p/${previewToken}`}
       />
     );
@@ -68,6 +69,7 @@ export default async function BuilderPage({
         initialDefinition={instrumentDefinition.parse(data.study.draft_definition)}
         initialComments={data.comments as unknown as StudyCommentRow[]}
         canResolveComments={can(session.role, "comments.resolve")}
+        currentUserId={session.userId}
       />
     </div>
   );

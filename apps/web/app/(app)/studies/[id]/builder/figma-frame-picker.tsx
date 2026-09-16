@@ -113,7 +113,7 @@ export function FigmaFramePicker({ studyId, questionCode, config, onPatch }: {
     });
     setFrames([]);
     setThumbnails({});
-    setStatus("Prototype importeret i kladden. Gem ændringer, forbind Figma OAuth og hent frames.");
+    setStatus("Prototype imported into draft. Save changes, connect Figma OAuth, then load frames.");
   }
 
   function openPicker(target: PickerTarget) {
@@ -128,7 +128,7 @@ export function FigmaFramePicker({ studyId, questionCode, config, onPatch }: {
   function selectCurrentFrame() {
     if (!pickerTarget || !currentFrame) return;
     if (pickerTarget === "goal" && currentFrame.id === config.startFrameId) {
-      setStatus("Målskærm skal være forskellig fra startskærm.");
+      setStatus("Goal screen must differ from starting screen.");
       return;
     }
     if (pickerTarget === "start") {
@@ -143,11 +143,11 @@ export function FigmaFramePicker({ studyId, questionCode, config, onPatch }: {
     }
     void loadThumbnail(currentFrame.id);
     setPickerTarget(null);
-    setStatus(`${pickerTarget === "start" ? "Startskærm" : "Målskærm"} valgt: ${currentFrame.name}.`);
+    setStatus(`${pickerTarget === "start" ? "Starting screen" : "Goal screen"} valgt: ${currentFrame.name}.`);
   }
 
-  const startFrame = config.startFrameId ? { id: config.startFrameId, name: config.startFrameName || frames.find((frame) => frame.id === config.startFrameId)?.name || "Valgt startskærm" } : null;
-  const goalFrame = config.goalFrameId ? { id: config.goalFrameId, name: config.goalFrameName || frames.find((frame) => frame.id === config.goalFrameId)?.name || "Valgt målskærm" } : null;
+  const startFrame = config.startFrameId ? { id: config.startFrameId, name: config.startFrameName || frames.find((frame) => frame.id === config.startFrameId)?.name || "Selected starting screen" } : null;
+  const goalFrame = config.goalFrameId ? { id: config.goalFrameId, name: config.goalFrameName || frames.find((frame) => frame.id === config.goalFrameId)?.name || "Selected goal screen" } : null;
 
   return <div className="space-y-4">
     <div className="rounded-xl border border-line bg-surface-raised p-4">
@@ -158,13 +158,13 @@ export function FigmaFramePicker({ studyId, questionCode, config, onPatch }: {
           <Button type="button" variant="secondary" disabled={!parsedLink} onClick={importPrototype}>Import prototype</Button>
         </div>
       </label>
-      {prototypeLink && <p className={`mt-2 text-xs ${parsedLink ? "text-emerald-700" : "text-red-700"}`} role={parsedLink ? "status" : "alert"}>{parsedLink ? "Klar til import" : "Link skal være et officielt Figma /proto/ link."}</p>}
-      {config.fileKey && <p className="mt-2 text-xs text-slate-600"><strong>{config.prototypeName || "Figma prototype"}</strong> · filreference gemt sikkert i kladden</p>}
+      {prototypeLink && <p className={`mt-2 text-xs ${parsedLink ? "text-emerald-700" : "text-red-700"}`} role={parsedLink ? "status" : "alert"}>{parsedLink ? "Ready to import" : "Link must be an official Figma /proto/ link."}</p>}
+      {config.fileKey && <p className="mt-2 text-xs text-slate-600"><strong>{config.prototypeName || "Figma prototype"}</strong> · File reference saved securely in draft</p>}
     </div>
 
     {config.fileKey && <div className="rounded-xl border border-line p-4 text-xs text-slate-600">
       <div className="flex flex-wrap items-center gap-2">
-        {connection?.configured ? <a className={`inline-flex h-7 items-center rounded-full border border-line px-3 text-xs ${config.fileKey ? "" : "pointer-events-none opacity-50"}`} href={`/api/figma/connect?studyId=${encodeURIComponent(studyId)}&questionCode=${encodeURIComponent(questionCode)}`}>{connection.connected ? "Reconnect Figma OAuth" : "Connect Figma OAuth"}</a> : <Button size="sm" variant="secondary" type="button" disabled title="Kræver Figma OAuth client, server-only secret og registreret callback">Connect Figma OAuth</Button>}
+        {connection?.configured ? <a className={`inline-flex h-7 items-center rounded-full border border-line px-3 text-xs ${config.fileKey ? "" : "pointer-events-none opacity-50"}`} href={`/api/figma/connect?studyId=${encodeURIComponent(studyId)}&questionCode=${encodeURIComponent(questionCode)}`}>{connection.connected ? "Reconnect Figma OAuth" : "Connect Figma OAuth"}</a> : <Button size="sm" variant="secondary" type="button" disabled title="Requires Figma OAuth client, server-only secret, and registered callback">Connect Figma OAuth</Button>}
         {connection?.connected && <Button size="sm" variant="secondary" type="button" onClick={() => void syncFrames()}>Resync with Figma</Button>}
         {connection?.connected && <Button size="sm" variant="ghost" type="button" onClick={async () => {
           const response = await fetch("/api/figma/disconnect", { method: "POST" });
@@ -173,11 +173,11 @@ export function FigmaFramePicker({ studyId, questionCode, config, onPatch }: {
         }}>Disconnect</Button>}
         <Button size="sm" variant="ghost" type="button" onClick={() => {
           onPatch({ fileKey: "", prototypeName: undefined, startFrameId: "", startFrameName: undefined, goalFrameId: undefined, goalFrameName: undefined, versionId: undefined, lastSyncedAt: undefined });
-          setFrames([]); setThumbnails({}); setPrototypeLink(""); setStatus("Figma-link fjernet fra kladden.");
+          setFrames([]); setThumbnails({}); setPrototypeLink(""); setStatus("Figma link removed from draft.");
         }}>Remove</Button>
-        {config.lastSyncedAt && <span className="ml-auto text-emerald-700">● Synkroniseret {new Date(config.lastSyncedAt).toLocaleString("da-DK")}</span>}
+        {config.lastSyncedAt && <span className="ml-auto text-emerald-700">● Synced {new Date(config.lastSyncedAt).toLocaleString("en-GB")}</span>}
       </div>
-      {!connection?.connected && <p className="mt-2">Gem kladden. Vælg derefter Connect Figma OAuth. OAuth kan kun bindes til et gemt prototype-spørgsmål.</p>}
+      {!connection?.connected && <p className="mt-2">Save the draft. Then choose Connect Figma OAuth. OAuth can only attach to a saved prototype question.</p>}
     </div>}
 
     {config.fileKey && <div className="rounded-xl border border-cyan-100 bg-cyan-50/60 p-4">
@@ -186,23 +186,23 @@ export function FigmaFramePicker({ studyId, questionCode, config, onPatch }: {
         {config.flowType === "task" && <div className="hidden items-center text-xl text-slate-400 sm:flex">→</div>}
         {config.flowType === "task" && <FrameCard label="Goal screen" frame={goalFrame} thumbnail={goalFrame ? thumbnails[goalFrame.id] : undefined} onChange={() => openPicker("goal")} disabled={!clientId || !config.startFrameId} />}
       </div>
-      <p className="mt-3 text-center text-xs text-slate-600">{config.flowType === "task" ? "Testen lykkes, når deltageren når målskærmen." : "Free flow kræver kun et startpunkt."}</p>
+      <p className="mt-3 text-center text-xs text-slate-600">{config.flowType === "task" ? "Task succeeds when the participant reaches the goal screen." : "Free flow only requires a starting point."}</p>
     </div>}
 
     {status && <p className="text-xs text-slate-600" role="status">{status}</p>}
 
-    {pickerTarget && <div className="fixed inset-0 z-[80] flex flex-col bg-slate-950/80 p-3 sm:p-6" role="dialog" aria-modal="true" aria-label={pickerTarget === "start" ? "Vælg startskærm" : "Vælg målskærm"}>
+    {pickerTarget && <div className="fixed inset-0 z-[80] flex flex-col bg-slate-950/80 p-3 sm:p-6" role="dialog" aria-modal="true" aria-label={pickerTarget === "start" ? "Choose start screen" : "Choose goal screen"}>
       <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
-          <div><p className="font-semibold text-slate-950">{pickerTarget === "start" ? "Vælg startskærm" : "Vælg målskærm"}</p><p className="text-xs text-slate-500">Klik gennem prototypen. Vælg derefter skærmen, som vises nu.</p></div>
-          <Button type="button" variant="ghost" onClick={() => setPickerTarget(null)}>Luk</Button>
+          <div><p className="font-semibold text-slate-950">{pickerTarget === "start" ? "Choose start screen" : "Choose goal screen"}</p><p className="text-xs text-slate-500">Click through prototype. Then choose the screen currently shown.</p></div>
+          <Button type="button" variant="ghost" onClick={() => setPickerTarget(null)}>Close</Button>
         </div>
         <div className="min-h-0 flex-1 bg-slate-100 p-2">
-          {pickerSrc ? <iframe ref={iframeRef} title="Vælg Figma-frame" src={pickerSrc} className="h-full min-h-[480px] w-full rounded-lg border border-line bg-white" allow="fullscreen" allowFullScreen referrerPolicy="strict-origin-when-cross-origin" /> : <p role="alert" className="p-6 text-sm">Figma Embed client ID eller prototype-link mangler.</p>}
+          {pickerSrc ? <iframe ref={iframeRef} title="Choose Figma frame" src={pickerSrc} className="h-full min-h-[480px] w-full rounded-lg border border-line bg-white" allow="fullscreen" allowFullScreen referrerPolicy="strict-origin-when-cross-origin" /> : <p role="alert" className="p-6 text-sm">Figma Embed client ID or prototype link is missing.</p>}
         </div>
         <div className="flex flex-wrap items-center gap-3 border-t border-line px-4 py-3">
-          <div className="min-w-0 flex-1"><p className="text-xs text-slate-500">Aktuel skærm</p><p className="truncate text-sm font-semibold">{currentFrame?.name ?? (embedLoaded ? "Navigér til ønsket skærm" : "Venter på Figma…")}</p></div>
-          <Button type="button" disabled={!currentFrame} onClick={selectCurrentFrame}>Vælg denne skærm</Button>
+          <div className="min-w-0 flex-1"><p className="text-xs text-slate-500">Current screen</p><p className="truncate text-sm font-semibold">{currentFrame?.name ?? (embedLoaded ? "Navigate to desired screen" : "Waiting for Figma…")}</p></div>
+          <Button type="button" disabled={!currentFrame} onClick={selectCurrentFrame}>Choose this screen</Button>
         </div>
       </div>
     </div>}
@@ -210,19 +210,19 @@ export function FigmaFramePicker({ studyId, questionCode, config, onPatch }: {
 }
 
 function figmaSyncErrorMessage(code: string, status: number): string {
-  if (code === "figma_scope_missing") return "Figma OAuth-appen mangler scope file_content:read. Vælg scopet under OAuth scopes i Figma, gem/publicér app-konfigurationen, og vælg derefter Reconnect Figma OAuth.";
+  if (code === "figma_scope_missing") return "Figma OAuth app is missing file_content:read scope. Add this scope under OAuth scopes in Figma, save and publish app configuration, then choose Reconnect Figma OAuth.";
   if (code === "figma_file_permission_denied") return "Figma-kontoen, som godkendte OAuth, mangler filadgang i Figma. Del filen med kontoen direkte eller via projekt/team; linkvisning alene giver ikke REST API-adgang. Reconnect derefter.";
-  if (code === "figma_token_rejected" || code === "figma_not_connected") return "Figma-token er udløbet eller afvist. Vælg Reconnect Figma OAuth og godkend igen.";
-  if (code === "figma_file_mismatch") return "Figma-linket matcher ikke den gemte kladde. Gem kladden, genindlæs builderen og prøv igen.";
-  if (code === "figma_file_not_found") return "Figma-filen blev ikke fundet. Importér det fulde prototype-link igen og kontrollér, at linket peger på en Figma Design-prototype.";
-  if (code === "figma_rate_limited") return "Figma begrænser API-kald midlertidigt. Vent ét minut og prøv Resync igen.";
-  if (code === "forbidden") return "Din platformrolle har ikke adgang til at redigere dette studie.";
+  if (code === "figma_token_rejected" || code === "figma_not_connected") return "Figma token expired or was rejected. Choose Reconnect Figma OAuth and approve access again.";
+  if (code === "figma_file_mismatch") return "Figma link does not match saved draft. Save the draft, reload builder, and try again.";
+  if (code === "figma_file_not_found") return "Figma file was not found. Import the full prototype link again and verify that it points to a Figma Design prototype.";
+  if (code === "figma_rate_limited") return "Figma is temporarily rate-limiting API calls. Wait one minute and try Resync again.";
+  if (code === "forbidden") return "Your platform role cannot edit this study.";
   if (code === "figma_rest_forbidden" || status === 403) return "Figma REST API afviser kaldet (403). Kontrollér, at OAuth-appen har file_content:read, og at OAuth-kontoen har filen via direkte deling eller projekt/team. Reconnect derefter.";
-  return `Figma-sync fejlede (HTTP ${status}). Prøv Reconnect Figma OAuth. Hvis fejlen fortsætter, kontrollér OAuth-scope og kontoens filadgang.`;
+  return `Figma sync failed (HTTP ${status}). Try Reconnect Figma OAuth. If the error continues, verify OAuth scope and account file access.`;
 }
 function FrameCard({ label, frame, thumbnail, onChange, disabled }: { label: string; frame: Frame | null; thumbnail?: string; onChange: () => void; disabled: boolean }) {
   return <div className="flex min-h-28 items-center gap-3 rounded-xl border border-line bg-white p-3">
-    <div className="grid h-20 w-24 shrink-0 place-items-center overflow-hidden rounded-lg border border-line bg-slate-100 bg-cover bg-center text-center text-[10px] text-slate-500" style={thumbnail ? { backgroundImage: `url("${thumbnail.replaceAll('"', '%22')}")` } : undefined} role="img" aria-label={frame ? `Preview af ${frame.name}` : "Ingen frame valgt"}>{!thumbnail && (frame ? "Preview hentes efter Figma sync" : "Vælg frame")}</div>
+    <div className="grid h-20 w-24 shrink-0 place-items-center overflow-hidden rounded-lg border border-line bg-slate-100 bg-cover bg-center text-center text-[10px] text-slate-500" style={thumbnail ? { backgroundImage: `url("${thumbnail.replaceAll('"', '%22')}")` } : undefined} role="img" aria-label={frame ? `Preview of ${frame.name}` : "No frame selected"}>{!thumbnail && (frame ? "Preview loads after Figma sync" : "Choose frame")}</div>
     <div className="min-w-0 flex-1"><p className="text-xs font-medium text-cyan-700">{label}</p><p className="mt-1 truncate text-sm font-semibold text-slate-950">{frame?.name ?? "Ikke valgt"}</p><Button className="mt-2" type="button" size="sm" variant="secondary" disabled={disabled} onClick={onChange}>{frame ? "Change" : "Choose"}</Button></div>
   </div>;
 }

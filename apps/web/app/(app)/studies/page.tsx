@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { can } from "@ok/domain";
+import { AUTHORING_QUESTION_TYPES, allQuestions, can, instrumentDefinition } from "@ok/domain";
 import { IconSearch, IconStudy } from "@/components/icons";
 import { Badge, Card, EmptyState, LinkButton, ListRow, StatusBadge } from "@/components/ui";
 import { requireSession } from "@/lib/auth";
@@ -24,7 +24,10 @@ export default async function StudiesPage({
       status: sp.status,
     });
     const workspaces = await tx`select id, name from workspaces where org_id = ${session.orgId} order by name`;
-    const templates = await tx`select id, name, category from templates where org_id is null or org_id = ${session.orgId} order by org_id nulls first, name`;
+    const templates = (await tx`select id, name, category, definition from templates where org_id is null or org_id = ${session.orgId} order by org_id nulls first, name`).filter((template) => {
+      const parsed = instrumentDefinition.safeParse(template.definition);
+      return parsed.success && allQuestions(parsed.data).every((question) => (AUTHORING_QUESTION_TYPES as readonly string[]).includes(question.type));
+    });
     return { studies, workspaces, templates };
   });
 

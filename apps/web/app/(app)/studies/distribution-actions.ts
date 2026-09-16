@@ -116,7 +116,7 @@ export async function previewPanelAudience(input: Pick<InviteInput, "studyId" | 
     const previewPanelists = await tx`
       select id, concat_ws(' ', first_name, last_name) as name, email::text as email
       from panelists
-      where org_id = ${session.orgId} and id = any(${tx.array(candidateIds.slice(0, 50))}::uuid[])
+      where org_id = ${session.orgId} and id = any(${tx.array(eligible.slice(0, 50))}::uuid[])
       order by last_name asc, first_name asc
       limit 50`;
     const excludedSummary: Record<string, number> = {};

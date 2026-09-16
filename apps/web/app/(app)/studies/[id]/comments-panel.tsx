@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Badge, Button, Textarea } from "@/components/ui";
-import { addStudyComment, resolveStudyComment } from "../actions";
+import { addStudyComment, deleteStudyComment, resolveStudyComment, updateStudyComment } from "../actions";
 
 export interface StudyCommentRow {
   id: string;
@@ -13,6 +13,7 @@ export interface StudyCommentRow {
   body: string;
   status: "open" | "resolved";
   author: string;
+  author_id: string;
   created_at: string;
   resolved_by_name: string | null;
   resolved_at: string | null;
@@ -24,17 +25,21 @@ export function CommentsPanel({
   questionCode,
   sectionId,
   canResolve,
+  currentUserId,
 }: {
   studyId: string;
   comments: StudyCommentRow[];
   questionCode?: string | null;
   sectionId?: string | null;
   canResolve: boolean;
+  currentUserId: string;
 }) {
   const router = useRouter();
   const [body, setBody] = useState("");
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [replyBody, setReplyBody] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingBody, setEditingBody] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const visible = useMemo(() => {
@@ -62,6 +67,26 @@ export function CommentsPanel({
     });
   }
 
+  function edit(commentId: string) {
+    startTransition(async () => {
+      setMessage(null);
+      const result = await updateStudyComment(commentId, editingBody);
+      if (!result.ok) { setMessage(result.error); return; }
+      setEditingId(null);
+      setEditingBody("");
+      router.refresh();
+    });
+  }
+
+  function remove(commentId: string) {
+    if (!window.confirm("Delete this comment?")) return;
+    startTransition(async () => {
+      setMessage(null);
+      const result = await deleteStudyComment(commentId);
+      if (!result.ok) { setMessage(result.error); return; }
+      router.refresh();
+    });
+  }
   const scopeLabel = questionCode !== undefined
     ? "question " + questionCode
     : sectionId !== undefined
@@ -96,12 +121,26 @@ export function CommentsPanel({
                 </Badge>
                 <time className="text-xs text-muted">{formatTime(comment.created_at)}</time>
               </div>
-              <p className="mt-1 whitespace-pre-wrap">{comment.body}</p>
+              {editingId === comment.id ? (
+                <div className="mt-2 space-y-2">
+                  <Textarea rows={2} value={editingBody} onChange={(event) => setEditingBody(event.target.value)} aria-label="Edit comment" maxLength={4000} />
+                  <div className="flex gap-2">
+                    <Button size="sm" disabled={pending || !editingBody.trim()} onClick={() => edit(comment.id)}>Save</Button>
+                    <Button size="sm" variant="ghost" onClick={() => { setEditingId(null); setEditingBody(""); }}>Cancel</Button>
+                  </div>
+                </div>
+              ) : <p className="mt-1 whitespace-pre-wrap">{comment.body}</p>}
               {comment.status === "resolved" && comment.resolved_by_name && (
                 <p className="mt-1 text-xs text-muted">Resolved by {comment.resolved_by_name} · {formatTime(comment.resolved_at)}</p>
               )}
               <div className="mt-2 flex gap-2">
-                <button className="text-xs text-accent underline" onClick={() => setReplyTo(replyTo === comment.id ? null : comment.id)}>Reply</button>
+                <button type="button" className="text-xs text-accent underline" onClick={() => setReplyTo(replyTo === comment.id ? null : comment.id)}>Reply</button>
+                {comment.author_id === currentUserId && (
+                  <>
+                    <button type="button" className="text-xs text-accent underline" onClick={() => { setEditingId(comment.id); setEditingBody(comment.body); }}>Edit</button>
+                    <button type="button" className="text-xs text-danger underline" disabled={pending} onClick={() => remove(comment.id)}>Delete</button>
+                  </>
+                )}
                 {canResolve && (
                   <button
                     className="text-xs text-accent underline"

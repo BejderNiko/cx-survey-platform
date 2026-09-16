@@ -138,3 +138,18 @@ describe("panel filter SQL", () => {
     expect(result.total).toBe(3);
   });
 });
+describe("panel filter payload validation", () => {
+  it("rejects a payload containing a valid group and an invalid group", () => {
+    expect(parsePanelFilters(JSON.stringify([
+      { field: "tag", operator: "any", values: ["vip"] },
+      { field: "custom", operator: "any", values: ["x"] },
+    ]))).toEqual([]);
+  });
+});
+describe("panel filter completeness", () => {
+  it("rejects a group without selected values", () => {
+    expect(parsePanelFilters(JSON.stringify([
+      { field: "tag", operator: "any", values: [] },
+    ]))).toEqual([]);
+  });
+});

@@ -53,7 +53,7 @@ export function parsePanelFilters(raw: string | undefined): PanelFilterGroup[] {
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.slice(0, 50).flatMap((item) => {
+    const groups: PanelFilterGroup[] = parsed.slice(0, 50).flatMap((item) => {
       if (!item || typeof item !== "object") return [];
       const value = item as Record<string, unknown>;
       const field = String(value.field);
@@ -61,6 +61,7 @@ export function parsePanelFilters(raw: string | undefined): PanelFilterGroup[] {
       if (!PANEL_FILTER_FIELD_SET.has(field) || !PANEL_FILTER_OPERATORS.has(operator)) return [];
       if (!Array.isArray(value.values) || value.values.some((entry) => typeof entry !== "string")) return [];
       const values = value.values.slice(0, 100).map((entry) => entry.trim()).filter(Boolean);
+      if (values.length === 0) return [];
       const key = typeof value.key === "string" ? value.key.trim() : undefined;
       if (field === "custom" && !key) return [];
       if (field === "age") {
@@ -82,6 +83,7 @@ export function parsePanelFilters(raw: string | undefined): PanelFilterGroup[] {
         ...(key ? { key } : {}),
       }];
     });
+    return groups.length === Math.min(parsed.length, 50) ? groups : [];
   } catch {
     return [];
   }
@@ -105,28 +107,28 @@ function segmentConditions(tx: Tx, filters: SegmentFilter[]) {
     switch (f.field) {
       case "tag": {
         const frag = tx`exists (select 1 from panelist_tags pt join tags tg on tg.id = pt.tag_id
-                          where pt.panelist_id = p.id and tg.name = ${String(f.value)})`;
+                          where pt.panelist_id = p.id and pt.org_id = p.org_id and tg.org_id = p.org_id and tg.name = ${String(f.value)})`;
         return f.op === "not_has" ? tx`not ${frag}` : frag;
       }
       case "attribute": {
         const key = f.key ?? "";
         if (f.op === "has") {
           return tx`exists (select 1 from panelist_attributes pa join custom_fields cf on cf.id = pa.field_id
-                     where pa.panelist_id = p.id and cf.key = ${key} and pa.value @> ${tx.json(f.value as never)})`;
+                     where pa.panelist_id = p.id and pa.org_id = p.org_id and cf.org_id = p.org_id and cf.key = ${key} and pa.value @> ${tx.json(f.value as never)})`;
         }
         if (f.op === "in") {
           return tx`exists (select 1 from panelist_attributes pa join custom_fields cf on cf.id = pa.field_id
-                     where pa.panelist_id = p.id and cf.key = ${key}
+                     where pa.panelist_id = p.id and pa.org_id = p.org_id and cf.org_id = p.org_id and cf.key = ${key}
                        and pa.value <@ ${tx.json((f.value ?? []) as never)})`;
         }
         return tx`exists (select 1 from panelist_attributes pa join custom_fields cf on cf.id = pa.field_id
-                   where pa.panelist_id = p.id and cf.key = ${key} and pa.value = ${tx.json(f.value as never)})`;
+                   where pa.panelist_id = p.id and pa.org_id = p.org_id and cf.org_id = p.org_id and cf.key = ${key} and pa.value = ${tx.json(f.value as never)})`;
       }
       case "consent":
-        return tx`exists (select 1 from consent_records cr where cr.panelist_id = p.id
+        return tx`exists (select 1 from consent_records cr where cr.panelist_id = p.id and cr.org_id = p.org_id
                    and cr.purpose = ${String(f.value)} and cr.status = 'granted')`;
       case "last_contact_days_gt":
-        return tx`not exists (select 1 from contact_events ce where ce.panelist_id = p.id
+        return tx`not exists (select 1 from contact_events ce where ce.panelist_id = p.id and ce.org_id = p.org_id
                    and ce.event_type = 'sent'
                    and ce.occurred_at > now() - make_interval(days => ${Number(f.value)}))`;
       case "birth_year": {
@@ -155,7 +157,7 @@ function panelFilterCondition(tx: Tx, group: PanelFilterGroup, value: string) {
     const separator = value.indexOf(":");
     const mode = separator > 0 ? value.slice(0, separator) : "opened";
     const distributionId = separator > 0 ? value.slice(separator + 1) : value;
-    const opened = tx`exists (select 1 from contact_events ce where ce.panelist_id = p.id and ce.distribution_id = ${distributionId} and ce.event_type = 'opened')`;
+    const opened = tx`exists (select 1 from contact_events ce where ce.panelist_id = p.id and ce.org_id = p.org_id and ce.distribution_id = ${distributionId} and ce.event_type = 'opened')`;
     return mode === "not_opened" ? tx`not ${opened}` : opened;
   }
   if (group.field === "customer_status") return tx`p.customer_status = ${value}`;
@@ -170,6 +172,7 @@ function panelFilterCondition(tx: Tx, group: PanelFilterGroup, value: string) {
     ) stored(raw_value)
     cross join lateral unnest(string_to_array(replace(stored.raw_value, ';', ','), ',')) token(item)
     where pa.panelist_id = p.id
+      and pa.org_id = p.org_id
       and cf.org_id = p.org_id
       and cf.key = ${key}
       and btrim(token.item) = ${value}
@@ -234,7 +237,7 @@ function panelistWhere(tx: Tx, params: PanelListParams) {
   if (params.language) conds.push(tx`p.language = ${params.language}`);
   if (params.tag) {
     conds.push(tx`exists (select 1 from panelist_tags pt join tags tg on tg.id = pt.tag_id
-                  where pt.panelist_id = p.id and tg.name = ${params.tag})`);
+                  where pt.panelist_id = p.id and pt.org_id = p.org_id and tg.org_id = p.org_id and tg.name = ${params.tag})`);
   }
   if (params.segment) conds.push(...segmentConditions(tx, params.segment.filters));
   if (params.filters) conds.push(...panelFilterConditions(tx, params.filters));
@@ -260,7 +263,7 @@ export async function listPanelists(tx: Tx, params: PanelListParams) {
            p.gender, p.city, p.customer_status, p.lifecycle, p.created_at,
            coalesce((select array_agg(tg.name order by tg.name) from panelist_tags pt
                      join tags tg on tg.id = pt.tag_id where pt.panelist_id = p.id and pt.org_id = p.org_id), '{}') as tags,
-           exists (select 1 from consent_records cr where cr.panelist_id = p.id
+           exists (select 1 from consent_records cr where cr.panelist_id = p.id and cr.org_id = p.org_id
                    and cr.purpose = 'survey_contact' and cr.status = 'granted') as has_consent,
            coalesce((
              select jsonb_object_agg(cf.key, pa.value)
@@ -379,11 +382,11 @@ export async function applyGovernance(
   const rows = await tx`
     select p.id, p.email::text as email,
       p.lifecycle::text as lifecycle,
-      exists (select 1 from consent_records cr where cr.panelist_id = p.id
+      exists (select 1 from consent_records cr where cr.panelist_id = p.id and cr.org_id = p.org_id
               and cr.purpose = 'survey_contact' and cr.status = 'granted') as consent,
-      exists (select 1 from contact_events ce where ce.panelist_id = p.id and ce.event_type = 'sent'
+      exists (select 1 from contact_events ce where ce.panelist_id = p.id and ce.org_id = p.org_id and ce.event_type = 'sent'
               and ce.occurred_at > now() - make_interval(days => ${governance.contactCooldownDays})) as in_cooldown,
-      (select count(*) from contact_events ce where ce.panelist_id = p.id and ce.event_type = 'sent'
+      (select count(*) from contact_events ce where ce.panelist_id = p.id and ce.org_id = p.org_id and ce.event_type = 'sent'
        and ce.occurred_at > now() - interval '30 days') as sent_30d
     from panelists p where p.id = any(${candidateIds})`;
   const eligible: string[] = [];

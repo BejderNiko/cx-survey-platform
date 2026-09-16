@@ -16,7 +16,7 @@ export default async function StudyPage({ params }: { params: Promise<{ id: stri
     const [study] = await tx`select * from studies where id = ${id} and org_id = ${session.orgId}`;
     if (!study) return null;
     const [versions, comments, respStats] = await Promise.all([
-      tx`select v.id, v.version_number, v.published_at, coalesce(u.full_name, 'Tidligere bruger') as publisher
+      tx`select v.id, v.version_number, v.published_at, coalesce(u.full_name, 'Former user') as publisher
          from study_versions v left join users u on u.id = v.published_by
          where v.study_id = ${id} and v.org_id = ${session.orgId} order by v.version_number desc`,
       tx`select c.id, c.parent_id,
@@ -24,7 +24,7 @@ export default async function StudyPage({ params }: { params: Promise<{ id: stri
              case when to_jsonb(c)->>'section_id' is not null then to_jsonb(c)->>'section_id'
                   when c.question_code like '__section__:%' then substring(c.question_code from 12)
                   else null end as section_id, c.body, c.status,
-                c.created_at::text, c.resolved_at::text, coalesce(u.full_name, 'Tidligere bruger') as author,
+                c.author_id, c.created_at::text, c.resolved_at::text, coalesce(u.full_name, 'Former user') as author,
                 resolver.full_name as resolved_by_name
          from comments c
          left join users u on u.id = c.author_id
@@ -56,23 +56,24 @@ export default async function StudyPage({ params }: { params: Promise<{ id: stri
         />
         {can(session.role, "studies.edit") && (
           <LinkButton href={`/studies/${id}/builder`} variant="primary">
-            Åbn builder
+            Open builder
           </LinkButton>
         )}
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiTile label="Spørgsmål i kladden" value={String(questionCount)} />
-        <KpiTile label="Gennemførte" value={String(data.respStats.completed)} />
-        <KpiTile label="Påbegyndte" value={String(data.respStats.partials)} />
-        <KpiTile label="Frasorterede" value={String(data.respStats.disqualified)} />
+        <KpiTile label="Questions in draft" value={String(questionCount)} />
+        <KpiTile label="Completed" value={String(data.respStats.completed)} />
+        <KpiTile label="Started" value={String(data.respStats.partials)} />
+        <KpiTile label="Disqualified" value={String(data.respStats.disqualified)} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card title="Publicerede versioner">
+        <Card title="Published versions">
+          <p className="mb-3 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs text-cyan-900">V1 draft is canonical and updates automatically while you edit. Published versions remain immutable snapshots for existing responses.</p>
           {data.versions.length === 0 ? (
             <p className="text-sm text-muted">
-              Ikke publiceret endnu — besvarelser refererer altid til en publiceret version.
+              Not published yet. Responses always reference a published version.
             </p>
           ) : (
             <Table>
@@ -95,6 +96,7 @@ export default async function StudyPage({ params }: { params: Promise<{ id: stri
             studyId={id}
             comments={data.comments as unknown as StudyCommentRow[]}
             canResolve={can(session.role, "comments.resolve")}
+            currentUserId={session.userId}
           />
         </Card>
       </div>

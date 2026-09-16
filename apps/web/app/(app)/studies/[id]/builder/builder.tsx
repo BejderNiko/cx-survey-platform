@@ -15,20 +15,20 @@ import { updateDraft } from "../../actions";
 import { StimulusEditor } from "./stimulus-editor";
 import { CommentsPanel, type StudyCommentRow } from "../comments-panel";
 
-/** Kladdeeditor til instrumentet: spørgsmålsliste, editor pr. spørgsmål, logik, forhåndsvisning. */
+/** Draft editor for survey instrument: question list, per-question editor, logic, and preview. */
 
 const CONDITION_OPS = ["eq", "ne", "lt", "lte", "gt", "gte", "answered"] as const;
 const QUESTION_GROUPS = groupedQuestionTypes().map((group) => ({ ...group, items: group.items.filter((item) => (AUTHORING_QUESTION_TYPES as readonly string[]).includes(item.type)) })).filter((group) => group.items.length > 0);
 
 
 const OP_LABEL: Record<string, string> = {
-  eq: "er lig med",
-  ne: "er forskellig fra",
-  lt: "er mindre end",
-  lte: "er højst",
-  gt: "er større end",
-  gte: "er mindst",
-  answered: "er besvaret",
+  eq: "is",
+  ne: "is not",
+  lt: "less than",
+  lte: "at most",
+  gt: "greater than",
+  gte: "at least",
+  answered: "is answered",
 };
 
 let uid = 0;
@@ -39,18 +39,20 @@ export function Builder({
   initialDefinition,
   initialComments,
   canResolveComments,
+  currentUserId,
 }: {
   studyId: string;
   initialDefinition: InstrumentDefinition;
   initialComments: StudyCommentRow[];
   canResolveComments: boolean;
+  currentUserId: string;
 }) {
   const [def, setDef] = useState<InstrumentDefinition>(initialDefinition);
   const [selected, setSelected] = useState<string | null>(def.blocks[0]?.questions[0]?.code ?? null);
   const [dirty, setDirty] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile" | null>(null);
-  const [newType, setNewType] = useState<Question["type"]>("nps");
+  const [newType, setNewType] = useState<Question["type"]>("single_choice");
   const [pending, startTransition] = useTransition();
   const editRevision = useRef(0);
 
@@ -91,15 +93,15 @@ export function Builder({
       ...(needsOptions(type)
         ? {
             options: [
-              { id: "opt1", label: { da: "Mulighed 1" }, ...(type === "likert" ? { value: 1 } : {}) },
-              { id: "opt2", label: { da: "Mulighed 2" }, ...(type === "likert" ? { value: 2 } : {}) },
+              { id: "opt1", label: { da: "Option 1" }, ...(type === "likert" ? { value: 1 } : {}) },
+              { id: "opt2", label: { da: "Option 2" }, ...(type === "likert" ? { value: 2 } : {}) },
             ],
           }
         : {}),
       ...(type === "rating" ? { scale: { min: 1, max: 5 } } : {}),
       ...(type === "matrix"
         ? {
-            rows: [{ id: "row1", label: { da: "Række 1" } }],
+            rows: [{ id: "row1", label: { da: "Row 1" } }],
             options: [
               { id: "1", label: { da: "1" }, value: 1 },
               { id: "2", label: { da: "2" }, value: 2 },
@@ -148,17 +150,17 @@ export function Builder({
       try {
         const res = await updateDraft(studyId, definitionAtStart);
         if (revisionAtStart !== editRevision.current) {
-          setSaveMsg("En ældre version blev gemt. Gem igen for at gemme de seneste ændringer.");
+          setSaveMsg("An older version was saved. Save again to save latest changes.");
           return;
         }
         setDirty(false);
         setSaveMsg(
           res.problems.length === 0
-            ? "Kladden er gemt."
-            : `Kladden er gemt med ${res.problems.length} valideringsadvarsel(-ler).`,
+            ? "Draft saved."
+            : `Draft saved with ${res.problems.length} validation warning(s).`,
         );
       } catch {
-        setSaveMsg("Kladden kunne ikke gemmes. Prøv igen.");
+        setSaveMsg("Draft could not be saved. Try again.");
       }
     });
   }
@@ -167,38 +169,38 @@ export function Builder({
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <Button onClick={save} disabled={pending || !dirty}>
-          {dirty ? "Gem kladde" : "Gemt"}
+          {dirty ? "Save draft" : "Saved"}
         </Button>
         <label className="flex items-center gap-2 text-sm">
-          <span className="text-muted">Deltagerenhed</span>
+          <span className="text-muted">Participant device</span>
           <Select
-            aria-label="Deltagerenhed"
+            aria-label="Participant device"
             value={def.participantDevice}
             onChange={(e) => mutate((draft) => {
               draft.participantDevice = e.target.value as InstrumentDefinition["participantDevice"];
             })}
           >
-            <option value="any">Alle enheder</option>
+            <option value="any">Any device</option>
             <option value="desktop">Desktop</option>
-            <option value="mobile">Mobil</option>
+            <option value="mobile">Mobile</option>
           </Select>
         </label>
         <Button variant="secondary" onClick={() => setPreviewMode(previewMode ? null : "desktop")}>
-          {previewMode ? "Luk forhåndsvisning" : "Forhåndsvisning"}
+          {previewMode ? "Close preview" : "Preview"}
         </Button>
         {previewMode && (
-          <Select aria-label="Forhåndsvisningsenhed" value={previewMode} onChange={(e) => setPreviewMode(e.target.value as "desktop" | "mobile")}>
+          <Select aria-label="Preview device" value={previewMode} onChange={(e) => setPreviewMode(e.target.value as "desktop" | "mobile")}>
             <option value="desktop">Desktop</option>
-            <option value="mobile">Mobil (375 px)</option>
+            <option value="mobile">Mobile (375 px)</option>
           </Select>
         )}
         {saveMsg && <span className="text-sm text-success">{saveMsg}</span>}
-        {problems.length > 0 && <Badge tone="amber">{problems.length} valideringsproblem(er)</Badge>}
+        {problems.length > 0 && <Badge tone="amber">{problems.length} validation problem(s)</Badge>}
       </div>
 
       {problems.length > 0 && (
         <details className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm">
-          <summary className="cursor-pointer font-medium">Valideringsproblemer (blokerer publicering)</summary>
+          <summary className="cursor-pointer font-medium">Validation problems (publishing blocked)</summary>
           <ul className="mt-1 list-disc pl-5">{problems.map((p, i) => <li key={i}>{p}</li>)}</ul>
         </details>
       )}
@@ -207,7 +209,7 @@ export function Builder({
         <StimulusEditor
           studyId={studyId}
           kind="context"
-          label="Fast kontekstbillede for studiet"
+          label="Study context image"
           value={def.contextStimulus ?? null}
           onChange={(contextStimulus) => mutate((draft) => { draft.contextStimulus = contextStimulus; })}
           onRemove={() => mutate((draft) => { delete draft.contextStimulus; })}
@@ -223,7 +225,7 @@ export function Builder({
       ) : (
         <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
           <div className="rounded-xl border border-line bg-surface shadow-card">
-            <div className="border-b border-line px-3 py-2 text-sm font-semibold text-heading">Spørgsmål</div>
+            <div className="border-b border-line px-3 py-2 text-sm font-semibold text-heading">Question</div>
             <ul>
               {questions.map((q, i) => (
                 <li key={q.code}
@@ -236,16 +238,16 @@ export function Builder({
                     <Badge className="mr-1.5">{QUESTION_TYPE_METADATA[q.type].name}</Badge>
                     {q.label.da || q.code}
                   </button>
-                  <button aria-label={`Flyt ${q.code} op`} className="px-1 text-muted hover:text-foreground cursor-pointer" onClick={() => move(q.code, -1)}>↑</button>
-                  <button aria-label={`Flyt ${q.code} ned`} className="px-1 text-muted hover:text-foreground cursor-pointer" onClick={() => move(q.code, 1)}>↓</button>
-                  <button aria-label={`Slet ${q.code}`} className="px-1 text-muted hover:text-danger cursor-pointer" onClick={() => remove(q.code)}>×</button>
+                  <button aria-label={`Move ${q.code} op`} className="px-1 text-muted hover:text-foreground cursor-pointer" onClick={() => move(q.code, -1)}>↑</button>
+                  <button aria-label={`Move ${q.code} ned`} className="px-1 text-muted hover:text-foreground cursor-pointer" onClick={() => move(q.code, 1)}>↓</button>
+                  <button aria-label={`Delete ${q.code}`} className="px-1 text-muted hover:text-danger cursor-pointer" onClick={() => remove(q.code)}>×</button>
                 </li>
               ))}
-              {questions.length === 0 && <li className="px-3 py-3 text-sm text-muted">Ingen spørgsmål endnu.</li>}
+              {questions.length === 0 && <li className="px-3 py-3 text-sm text-muted">No questions yet.</li>}
             </ul>
             <div className="space-y-2 p-2">
               <Select
-                aria-label="Ny spørgsmålstype"
+                aria-label="New question type"
                 value={newType}
                 onChange={(e) => setNewType(e.target.value as Question["type"])}
               >
@@ -260,12 +262,12 @@ export function Builder({
               <div className="rounded-lg bg-background p-2 text-xs text-muted">
                 <p className="font-semibold text-foreground">{QUESTION_TYPE_METADATA[newType].name}</p>
                 <p>{QUESTION_TYPE_METADATA[newType].description}</p>
-                <p><span className="font-medium text-foreground">Eksempel:</span> {QUESTION_TYPE_METADATA[newType].example}</p>
+                <p><span className="font-medium text-foreground">Example:</span> {QUESTION_TYPE_METADATA[newType].example}</p>
                 <p><span className="font-medium text-foreground">Respondent:</span> {QUESTION_TYPE_METADATA[newType].respondentAction}</p>
-                <p><span className="font-medium text-foreground">Resultat:</span> {QUESTION_TYPE_METADATA[newType].resultMeasure}</p>
+                <p><span className="font-medium text-foreground">Result:</span> {QUESTION_TYPE_METADATA[newType].resultMeasure}</p>
               </div>
               <Button size="sm" variant="secondary" onClick={() => addQuestion(newType)}>
-                + Tilføj
+                + Add
               </Button>
             </div>
           </div>
@@ -290,12 +292,13 @@ export function Builder({
                   comments={initialComments}
                   questionCode={current.code}
                   canResolve={canResolveComments}
+                  currentUserId={currentUserId}
                 />
               </div>
             )}
             {current && (
               <button className="mt-4 text-xs text-accent underline cursor-pointer" onClick={() => setSelected(null)}>
-                Redigér intro- og afslutningstekster i stedet
+                Edit intro and closing messages instead
               </button>
             )}
           </div>
@@ -351,20 +354,20 @@ function QuestionEditor({
         <label className="ml-auto flex items-center gap-1.5 text-sm">
           <input type="checkbox" checked={question.required}
             onChange={(e) => onChange({ required: e.target.checked })} />
-          Obligatorisk
+          Required
         </label>
       </div>
 
-      <LocalizedInput label="Spørgsmål" value={question.label} onChange={(label) => onChange({ label })} />
-      <LocalizedInput label="Hjælpetekst" value={question.helpText ?? {}} onChange={(helpText) => onChange({ helpText })} />
+      <LocalizedInput label="Question" value={question.label} onChange={(label) => onChange({ label })} />
+      <LocalizedInput label="Help text" value={question.helpText ?? {}} onChange={(helpText) => onChange({ helpText })} />
 
       {needsOptions(question.type) && (
         <div>
-          <Label>Svarmuligheder {question.type === "likert" ? "(med talværdier)" : ""}</Label>
+          <Label>Answer choices {question.type === "likert" ? "(with numeric values)" : ""}</Label>
           <ul className="space-y-1.5">
             {(question.options ?? []).map((opt, i) => (
               <li key={opt.id} className="flex flex-wrap items-center gap-1.5">
-                <Input aria-label={`Mulighed ${i + 1} (dansk)`} className="w-44" placeholder="dansk"
+                <Input aria-label={`Choice ${i + 1} (Danish)`} className="w-44" placeholder="Danish"
                   value={opt.label.da ?? ""}
                   onChange={(e) => {
                     const options = structuredClone(question.options ?? []);
@@ -372,7 +375,7 @@ function QuestionEditor({
                     onChange({ options });
                   }} />
                 {question.type === "likert" && (
-                  <Input aria-label={`Mulighed ${i + 1} værdi`} type="number" className="w-20"
+                  <Input aria-label={`Choice ${i + 1} value`} type="number" className="w-20"
                     value={opt.value === undefined ? "" : String(opt.value)}
                     onChange={(e) => {
                       const options = structuredClone(question.options ?? []);
@@ -380,7 +383,7 @@ function QuestionEditor({
                       onChange({ options });
                     }} />
                 )}
-                <button aria-label={`Fjern mulighed ${i + 1}`} className="px-1 text-muted hover:text-danger cursor-pointer"
+                <button aria-label={`Delete choice ${i + 1}`} className="px-1 text-muted hover:text-danger cursor-pointer"
                   onClick={() => onChange({ options: (question.options ?? []).filter((_, j) => j !== i) })}>
                   ×
                 </button>
@@ -391,13 +394,27 @@ function QuestionEditor({
             onClick={() => onChange({
               options: [...(question.options ?? []), { id: nextId("opt"), label: { da: "" } }],
             })}>
-            + Mulighed
+            + Add choice
           </Button>
           <label className="ml-3 inline-flex items-center gap-1.5 text-sm">
             <input type="checkbox" checked={question.randomizeOptions ?? false}
               onChange={(e) => onChange({ randomizeOptions: e.target.checked })} />
-            Bland rækkefølgen af muligheder
+            Randomize choice order
           </label>
+          {question.type === "multiple_choice" && (
+            <div className="mt-3 rounded-lg border border-line bg-background p-3">
+              <p className="text-xs font-semibold text-foreground">Selection limits</p>
+              <div className="mt-2 flex flex-wrap gap-3">
+                <label className="text-xs text-muted">Minimum
+                  <Input type="number" min={0} max={question.options?.length ?? 0} className="mt-1 w-20" value={question.multipleSelectMinLimit ?? 0} onChange={(e) => onChange({ multipleSelectMinLimit: Math.max(0, Math.min(question.options?.length ?? 0, Number(e.target.value) || 0)) })} />
+                </label>
+                <label className="text-xs text-muted">Maximum
+                  <Input type="number" min={1} max={question.options?.length ?? 1} className="mt-1 w-20" value={question.multipleSelectLimit ?? question.options?.length ?? 1} onChange={(e) => onChange({ multipleSelectLimit: Math.max(1, Math.min(question.options?.length ?? 1, Number(e.target.value) || 1)) })} />
+                </label>
+              </div>
+              <p className="mt-2 text-[11px] text-muted">Set minimum to 0 when an empty optional answer is allowed.</p>
+            </div>
+          )}
         </div>
       )}
 
@@ -409,7 +426,7 @@ function QuestionEditor({
               onChange={(e) => onChange({ scale: { ...(question.scale ?? { min: 1, max: 5 }), min: Number(e.target.value) } })} />
           </div>
           <div>
-            <Label>Maks.</Label>
+            <Label>End value</Label>
             <Input type="number" className="w-20" value={question.scale?.max ?? 5}
               onChange={(e) => onChange({ scale: { ...(question.scale ?? { min: 1, max: 5 }), max: Number(e.target.value) } })} />
           </div>
@@ -418,37 +435,37 @@ function QuestionEditor({
 
       {question.type === "matrix" && (
         <div>
-          <Label>Rækker</Label>
+          <Label>Rows</Label>
           <ul className="space-y-1.5">
             {(question.rows ?? []).map((row, i) => (
               <li key={row.id} className="flex items-center gap-1.5">
-                <Input aria-label={`Række ${i + 1} (dansk)`} className="w-44" placeholder="dansk" value={row.label.da ?? ""}
+                <Input aria-label={`Row ${i + 1} (Danish)`} className="w-44" placeholder="Danish" value={row.label.da ?? ""}
                   onChange={(e) => {
                     const rows = structuredClone(question.rows ?? []);
                     rows[i].label.da = e.target.value;
                     onChange({ rows });
                   }} />
-                <button aria-label={`Fjern række ${i + 1}`} className="px-1 text-muted hover:text-danger cursor-pointer"
+                <button aria-label={`Delete row ${i + 1}`} className="px-1 text-muted hover:text-danger cursor-pointer"
                   onClick={() => onChange({ rows: (question.rows ?? []).filter((_, j) => j !== i) })}>×</button>
               </li>
             ))}
           </ul>
           <Button size="sm" variant="secondary" className="mt-2"
             onClick={() => onChange({ rows: [...(question.rows ?? []), { id: nextId("row"), label: { da: "" } }] })}>
-            + Række
+            + Add row
           </Button>
         </div>
       )}
 
       {question.type === "preference_test" && (
         <div className="space-y-3">
-          <p className="text-sm text-muted">Upload 2–8 billeder. Respondenten vælger præcis ét.</p>
+          <p className="text-sm text-muted">Attach 2–8 images. Participants choose one.</p>
           {(question.stimuli ?? []).map((stimulus, index) => (
             <StimulusEditor
               key={stimulus.id}
               studyId={studyId}
               kind="preference"
-              label={`Billede ${index + 1}`}
+              label={`Image ${index + 1}`}
               value={stimulus}
               onChange={(asset) => {
                 const stimuli = [...(question.stimuli ?? [])];
@@ -462,7 +479,7 @@ function QuestionEditor({
             <StimulusEditor
               studyId={studyId}
               kind="preference"
-              label={`Tilføj billede ${(question.stimuli ?? []).length + 1}`}
+              label={`Add image ${(question.stimuli ?? []).length + 1}`}
               value={null}
               onChange={(asset) => onChange({ stimuli: [...(question.stimuli ?? []), asset] })}
             />
@@ -473,30 +490,30 @@ function QuestionEditor({
               checked={question.randomizeStimuli ?? false}
               onChange={(event) => onChange({ randomizeStimuli: event.target.checked })}
             />
-            Bland billedernes rækkefølge for hver respondent
+            Randomize image order for each participant
           </label>
         </div>
       )}
 
       {question.type === "first_click" && (
         <div className="space-y-3">
-          <LocalizedInput label="Opgaveinstruktion" value={question.taskText ?? {}} onChange={(taskText) => onChange({ taskText })} />
+          <LocalizedInput label="Task instruction" value={question.taskText ?? {}} onChange={(taskText) => onChange({ taskText })} />
           <StimulusEditor
             studyId={studyId}
             kind="first_click"
-            label="Billede til første klik"
+            label="First-click image"
             value={question.stimulus ?? null}
             onChange={(stimulus) => onChange({ stimulus, imageUrl: undefined })}
             onRemove={() => onChange({ stimulus: undefined })}
           />
           {question.imageUrl && !question.stimulus && (
-            <p className="text-xs text-muted">Ældre publicerede versioner kan fortsat vise deres eksisterende billed-URL.</p>
+            <p className="text-xs text-muted">Older published versions may still show their existing image URL.</p>
           )}
         </div>
       )}
 
       <div className="border-t border-line pt-3">
-        <Label>Vis kun hvis (alle betingelser skal gælde)</Label>
+        <Label>Show only if (all conditions must match)</Label>
         <ConditionRows
           conditions={question.visibleIf ?? []}
           candidates={priorQuestions}
@@ -505,12 +522,12 @@ function QuestionEditor({
       </div>
 
       <div className="border-t border-line pt-3">
-        <Label>Efter svar: spring til (første regel, der matcher, vinder)</Label>
+        <Label>After answer: branch to (first matching rule wins)</Label>
         <ul className="space-y-1.5">
           {(question.branches ?? []).map((br, i) => (
             <li key={br.id} className="flex flex-wrap items-center gap-1.5 text-sm">
-              <span className="text-muted">hvis svaret</span>
-              <Select aria-label="Betingelsesoperator" value={br.when[0]?.op ?? "eq"}
+              <span className="text-muted">if answer</span>
+              <Select aria-label="Condition operator" value={br.when[0]?.op ?? "eq"}
                 onChange={(e) => {
                   const branches = structuredClone(question.branches ?? []);
                   branches[i].when = [{ questionCode: question.code, op: e.target.value as typeof CONDITION_OPS[number], value: br.when[0]?.value }];
@@ -518,7 +535,7 @@ function QuestionEditor({
                 }}>
                 {CONDITION_OPS.map((op) => <option key={op} value={op}>{OP_LABEL[op] ?? op}</option>)}
               </Select>
-              <Input aria-label="Betingelsesværdi" className="w-24"
+              <Input aria-label="Condition value" className="w-24"
                 value={String(br.when[0]?.value ?? "")}
                 onChange={(e) => {
                   const branches = structuredClone(question.branches ?? []);
@@ -531,18 +548,18 @@ function QuestionEditor({
                   }];
                   onChange({ branches });
                 }} />
-              <span className="text-muted">gå til</span>
-              <Select aria-label="Mål for springet" value={br.goTo}
+              <span className="text-muted">go to</span>
+              <Select aria-label="Branch target" value={br.goTo}
                 onChange={(e) => {
                   const branches = structuredClone(question.branches ?? []);
                   branches[i].goTo = e.target.value;
                   onChange({ branches });
                 }}>
                 {laterQuestions.map((q) => <option key={q.code} value={q.code}>{q.code}</option>)}
-                <option value="END">AFSLUT (takkeside)</option>
-                <option value="DISQUALIFY">FRASORTÉR</option>
+                <option value="END">END (thank-you screen)</option>
+                <option value="DISQUALIFY">DISQUALIFY</option>
               </Select>
-              <button aria-label="Fjern springregel" className="px-1 text-muted hover:text-danger cursor-pointer"
+              <button aria-label="Delete branch rule" className="px-1 text-muted hover:text-danger cursor-pointer"
                 onClick={() => onChange({ branches: (question.branches ?? []).filter((_, j) => j !== i) })}>×</button>
             </li>
           ))}
@@ -554,7 +571,7 @@ function QuestionEditor({
               { id: nextId("br"), when: [{ questionCode: question.code, op: "eq", value: "" }], goTo: "END" },
             ],
           })}>
-          + Springregel
+          + Add branch rule
         </Button>
       </div>
     </div>
@@ -573,7 +590,7 @@ function ConditionRows({
       <ul className="space-y-1.5">
         {conditions.map((c, i) => (
           <li key={i} className="flex flex-wrap items-center gap-1.5 text-sm">
-            <Select aria-label="Betingelsens spørgsmål" value={c.questionCode}
+            <Select aria-label="Condition question" value={c.questionCode}
               onChange={(e) => {
                 const next = structuredClone(conditions);
                 next[i].questionCode = e.target.value;
@@ -581,7 +598,7 @@ function ConditionRows({
               }}>
               {candidates.map((q) => <option key={q.code} value={q.code}>{q.code}</option>)}
             </Select>
-            <Select aria-label="Betingelsesoperator" value={c.op}
+            <Select aria-label="Condition operator" value={c.op}
               onChange={(e) => {
                 const next = structuredClone(conditions);
                 next[i].op = e.target.value as typeof c.op;
@@ -589,7 +606,7 @@ function ConditionRows({
               }}>
               {CONDITION_OPS.map((op) => <option key={op} value={op}>{OP_LABEL[op] ?? op}</option>)}
             </Select>
-            <Input aria-label="Betingelsesværdi" className="w-24" value={String(c.value ?? "")}
+            <Input aria-label="Condition value" className="w-24" value={String(c.value ?? "")}
               onChange={(e) => {
                 const next = structuredClone(conditions);
                 const raw = e.target.value;
@@ -597,17 +614,17 @@ function ConditionRows({
                 next[i].value = raw !== "" && !Number.isNaN(num) ? num : raw;
                 onChange(next);
               }} />
-            <button aria-label="Fjern betingelse" className="px-1 text-muted hover:text-danger cursor-pointer"
+            <button aria-label="Delete condition" className="px-1 text-muted hover:text-danger cursor-pointer"
               onClick={() => onChange(conditions.filter((_, j) => j !== i))}>×</button>
           </li>
         ))}
       </ul>
       {candidates.length === 0 ? (
-        <p className="mt-1 text-xs text-muted">Der kan kun henvises til tidligere spørgsmål.</p>
+        <p className="mt-1 text-xs text-muted">Only earlier questions can be referenced.</p>
       ) : (
         <Button size="sm" variant="secondary" className="mt-2"
           onClick={() => onChange([...conditions, { questionCode: candidates[0].code, op: "eq", value: "" }])}>
-          + Betingelse
+          + Add condition
         </Button>
       )}
     </div>
@@ -621,14 +638,14 @@ function MessagesEditor({
   mutate: (fn: (d: InstrumentDefinition) => void) => void;
 }) {
   const entries: { key: "intro" | "thankYou" | "disqualified" | "closed"; label: string }[] = [
-    { key: "intro", label: "Introtekst" },
-    { key: "thankYou", label: "Takketekst" },
-    { key: "disqualified", label: "Frasorteret-tekst" },
-    { key: "closed", label: "Lukket-tekst" },
+    { key: "intro", label: "Intro message" },
+    { key: "thankYou", label: "Thank-you message" },
+    { key: "disqualified", label: "Disqualified message" },
+    { key: "closed", label: "Closed message" },
   ];
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted">Vælg et spørgsmål til venstre, eller redigér undersøgelsens tekster nedenfor.</p>
+      <p className="text-sm text-muted">Select a question on the left, or edit study messages below.</p>
       {entries.map(({ key, label }) => (
         <LocalizedInput
           key={key}

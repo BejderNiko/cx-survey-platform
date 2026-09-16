@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { instrumentDefinition, validateInstrument, validateSubmission } from "../src";
+import { AUTHORING_QUESTION_TYPES, instrumentDefinition, validateInstrument, validateSubmission } from "../src";
 
 const definition = instrumentDefinition.parse({
   languages: ["en"],
@@ -201,5 +201,49 @@ describe("multiple select limits", () => {
     const invalid = structuredClone(limited);
     invalid.blocks[0].questions[0].multipleSelectLimit = 3;
     expect(validateInstrument(invalid).join(" ")).toContain("select limit cannot exceed its option count");
+  });
+});
+
+describe("new survey authoring constraints", () => {
+  it("keeps NPS and first-click out of new question types", () => {
+    expect(AUTHORING_QUESTION_TYPES).not.toContain("nps");
+    expect(AUTHORING_QUESTION_TYPES).not.toContain("first_click");
+  });
+
+  it("defaults attached images to disabled", () => {
+    const parsed = instrumentDefinition.parse({
+      languages: ["en"], defaultLanguage: "en", messages: {},
+      contextStimulus: {
+        id: "context", assetId: "11111111-1111-4111-8111-111111111111", altText: "Context",
+      },
+      blocks: [{ id: "main", questions: [] }],
+    });
+    expect(parsed.contextStimulus?.enabled).toBe(false);
+  });
+
+  it("rejects answers below a configured minimum while allowing optional empty answers", () => {
+    const constrained = instrumentDefinition.parse({
+      languages: ["en"], defaultLanguage: "en", messages: {}, blocks: [{ id: "main", questions: [{
+        code: "channels", type: "multiple_choice", label: { en: "Channels" }, required: false,
+        multipleSelectMinLimit: 2, multipleSelectLimit: 3,
+        options: [{ id: "email", label: { en: "Email" } }, { id: "sms", label: { en: "SMS" } }, { id: "phone", label: { en: "Phone" } }],
+      }] }],
+    });
+    const belowMinimum = validateSubmission(constrained, {
+      status: "completed", answers: [{ code: "channels", type: "multiple_choice", value: ["email"] }], interactions: [],
+    });
+    expect(belowMinimum).toMatchObject({ ok: false });
+    if (!belowMinimum.ok) expect(belowMinimum.errors.join(" ")).toContain("requires at least 2");
+    expect(validateSubmission(constrained, { status: "completed", answers: [], interactions: [] })).toMatchObject({ ok: true });
+  });
+
+  it("rejects a minimum above maximum during authoring validation", () => {
+    const invalid = instrumentDefinition.parse({
+      languages: ["en"], defaultLanguage: "en", messages: {}, blocks: [{ id: "main", questions: [{
+        code: "channels", type: "multiple_choice", label: { en: "Channels" }, multipleSelectMinLimit: 3, multipleSelectLimit: 2,
+        options: [{ id: "email", label: { en: "Email" } }, { id: "sms", label: { en: "SMS" } }, { id: "phone", label: { en: "Phone" } }],
+      }] }],
+    });
+    expect(validateInstrument(invalid).join(" ")).toContain("minimum selection limit cannot exceed its maximum");
   });
 });

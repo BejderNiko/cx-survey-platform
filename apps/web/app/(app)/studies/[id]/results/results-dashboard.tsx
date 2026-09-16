@@ -46,7 +46,7 @@ export async function ResultsDashboard({ studyId, search }: { studyId: string; s
              case when to_jsonb(c)->>'section_id' is not null then to_jsonb(c)->>'section_id'
                   when c.question_code like '__section__:%' then substring(c.question_code from 12)
                   else null end as section_id, c.body, c.status,
-             c.created_at::text, c.resolved_at::text, coalesce(u.full_name, 'Tidligere bruger') as author,
+             c.author_id, c.created_at::text, c.resolved_at::text, coalesce(u.full_name, 'Former user') as author,
              resolver.full_name as resolved_by_name
       from comments c
       left join users u on u.id = c.author_id
@@ -155,9 +155,9 @@ export async function ResultsDashboard({ studyId, search }: { studyId: string; s
           </div>
         </div>      </Card>
       {allQuestions(definition).map((question) => question.type === "prototype_test" ? (
-        <PrototypeResult key={question.code} studyId={studyId} studyVersionId={data.version ? String(data.version.id) : ""} question={question} logicText={logicTextForQuestion(question, definition)} values={questionValues(question.code)} paths={(pathsByQuestion.get(question.code) ?? []).filter((path) => filteredIds.has(path.responseId))} filters={filters} canRenamePaths={can(session.role, "reports.create")} pathLabels={Object.fromEntries([...pathLabels].filter(([key]) => key.startsWith(`${question.code}\u0000`)).map(([key, value]) => [key.slice(question.code.length + 1), value]))} comments={resultCommentRows} canResolveComments={canResolveComments} />
+        <PrototypeResult key={question.code} studyId={studyId} studyVersionId={data.version ? String(data.version.id) : ""} question={question} logicText={logicTextForQuestion(question, definition)} values={questionValues(question.code)} paths={(pathsByQuestion.get(question.code) ?? []).filter((path) => filteredIds.has(path.responseId))} filters={filters} canRenamePaths={can(session.role, "reports.create")} pathLabels={Object.fromEntries([...pathLabels].filter(([key]) => key.startsWith(`${question.code}\u0000`)).map(([key, value]) => [key.slice(question.code.length + 1), value]))} comments={resultCommentRows} canResolveComments={canResolveComments} currentUserId={session.userId} />
       ) : (
-        <QuestionResult key={question.code} studyId={studyId} question={question} logicText={logicTextForQuestion(question, definition)} values={questionValues(question.code)} filters={filters} hrefFor={hrefFor} firstClickInteractions={firstClickByQuestion.get(question.code) ?? []} comments={resultCommentRows} canResolveComments={canResolveComments} />
+        <QuestionResult key={question.code} studyId={studyId} question={question} logicText={logicTextForQuestion(question, definition)} values={questionValues(question.code)} filters={filters} hrefFor={hrefFor} firstClickInteractions={firstClickByQuestion.get(question.code) ?? []} comments={resultCommentRows} canResolveComments={canResolveComments} currentUserId={session.userId} />
       ))}
 
       <OpenAnswerSearch items={openAnswerItems} />
@@ -210,8 +210,8 @@ function formatLogicValue(value: unknown): string {
   return String(value);
 }
 
-function QuestionResult({ studyId, question, logicText, values, filters, hrefFor, firstClickInteractions, comments, canResolveComments }: { studyId: string; question: Question; logicText: string | null; values: unknown[]; filters: ResultFilter[]; hrefFor: (filters: ResultFilter[]) => string; firstClickInteractions: { payload: unknown }[]; comments: StudyCommentRow[]; canResolveComments: boolean }) {
-  const title = <span>{lt(question.label, "da") || question.code} {logicText && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">{logicText}</span>} <span className="text-xs font-normal text-muted">n = {values.length}</span><ResultCommentPopover studyId={studyId} questionCode={question.code} comments={comments} canResolve={canResolveComments} /></span>;
+function QuestionResult({ studyId, question, logicText, values, filters, hrefFor, firstClickInteractions, comments, canResolveComments, currentUserId }: { studyId: string; question: Question; logicText: string | null; values: unknown[]; filters: ResultFilter[]; hrefFor: (filters: ResultFilter[]) => string; firstClickInteractions: { payload: unknown }[]; comments: StudyCommentRow[]; canResolveComments: boolean; currentUserId: string }) {
+  const title = <span>{lt(question.label, "da") || question.code} {logicText && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">{logicText}</span>} <span className="text-xs font-normal text-muted">n = {values.length}</span><ResultCommentPopover studyId={studyId} questionCode={question.code} comments={comments} canResolve={canResolveComments} currentUserId={currentUserId} /></span>;
   if (question.type === "nps") {
     const result = computeNps(values);
     return <Card title={title}><div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-4"><KpiTile label="NPS" value={result.score === null ? "—" : fmtNumber(result.score)} hint={`(${result.promoters} − ${result.detractors}) / ${result.valid}`} /><KpiTile label="Ambassadører" value={String(result.promoters)} /><KpiTile label="Passive" value={String(result.passives)} /><KpiTile label="Kritikere" value={String(result.detractors)} /></div><Bars question={question} options={Array.from({ length: 11 }, (_, value) => ({ value: String(value), label: String(value) }))} values={values} filters={filters} hrefFor={hrefFor} /></Card>;
@@ -246,7 +246,7 @@ function Bars({ question, options, values, filters, hrefFor }: { question: Quest
   })}</div>;
 }
 
-function PrototypeResult({ studyId, studyVersionId, question, logicText, values, paths, filters, canRenamePaths, pathLabels, comments, canResolveComments }: { studyId: string; studyVersionId: string; question: Question; logicText: string | null; values: unknown[]; paths: ReturnType<typeof buildPrototypePaths>; filters: ResultFilter[]; canRenamePaths: boolean; pathLabels: Record<string, string>; comments: StudyCommentRow[]; canResolveComments: boolean }) {
+function PrototypeResult({ studyId, studyVersionId, question, logicText, values, paths, filters, canRenamePaths, pathLabels, comments, canResolveComments, currentUserId }: { studyId: string; studyVersionId: string; question: Question; logicText: string | null; values: unknown[]; paths: ReturnType<typeof buildPrototypePaths>; filters: ResultFilter[]; canRenamePaths: boolean; pathLabels: Record<string, string>; comments: StudyCommentRow[]; canResolveComments: boolean; currentUserId: string }) {
   const groups = groupCommonPaths(paths);
   const goalFrameId = question.prototype?.goalFrameId;
   const successes = goalFrameId ? paths.filter((path) => path.frames.includes(goalFrameId)).length : 0;
@@ -254,7 +254,7 @@ function PrototypeResult({ studyId, studyVersionId, question, logicText, values,
   const misclicks = clicks.filter((click) => click.isMisclick).length;
   const averageElapsedMs = paths.length ? paths.reduce((sum, path) => sum + path.elapsedMs, 0) / paths.length : 0;
   const screenshots = (question.prototype?.frameScreenshots ?? []).flatMap((entry) => entry.screenshot ? [{ frameId: entry.frameId, frameName: entry.frameName, assetId: entry.screenshot.assetId, coordinateScale: entry.coordinateScale }] : []);
-  return <Card title={<span>{lt(question.label, "da") || question.code} {logicText && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">{logicText}</span>} <span className="text-xs font-normal text-muted">n = {values.length}</span><ResultCommentPopover studyId={studyId} questionCode={question.code} comments={comments} canResolve={canResolveComments} /></span>}>
+  return <Card title={<span>{lt(question.label, "da") || question.code} {logicText && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">{logicText}</span>} <span className="text-xs font-normal text-muted">n = {values.length}</span><ResultCommentPopover studyId={studyId} questionCode={question.code} comments={comments} canResolve={canResolveComments} currentUserId={currentUserId} /></span>}>
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-5"><KpiTile label={question.prototype?.flowType === "free" ? "Flow" : "Mål nået"} value={question.prototype?.flowType === "free" ? "Free" : `${values.length ? fmtNumber(successes / values.length * 100, 1) : 0} %`} hint={question.prototype?.flowType === "free" ? "Intet goal-krav" : `${successes} ÷ ${values.length}`} /><KpiTile label="Deltagere" value={String(values.length)} /><KpiTile label="Gennemsnitstid" value={`${fmtNumber(averageElapsedMs / 1000, 1)} s`} hint={`${fmtNumber(paths.reduce((sum, path) => sum + path.elapsedMs, 0) / 1000, 1)} s ÷ ${paths.length}`} /><KpiTile label="Klik" value={String(clicks.length)} hint={`${misclicks} fejlklik · ${clicks.length ? fmtNumber(misclicks / clicks.length * 100, 1) : 0} %`} /><KpiTile label="Fælles paths" value={String(groups.length)} /></div>
     <PrototypeResultView studyId={studyId} studyVersionId={studyVersionId} questionCode={question.code} flowType={question.prototype?.flowType ?? "task"} goalFrameId={goalFrameId} paths={paths} filters={filters} screenshots={screenshots} canRenamePaths={canRenamePaths} pathLabels={pathLabels} />
     <p className="mt-3 text-xs text-muted">Path-succes beregnes som ‘goal frame set mindst én gang’. Screenshot-overlay bruger kun godkendte private-storage assets. Koordinatskala skal matche Figma-frame og screenshot-export; live alignment er ikke verificeret uden rigtig prototype.</p>

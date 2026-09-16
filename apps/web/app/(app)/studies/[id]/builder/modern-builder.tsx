@@ -19,6 +19,7 @@ import { SurveyRenderer } from "@/components/survey/renderer";
 import { updateDraft } from "../../actions";
 import { FigmaFramePicker } from "./figma-frame-picker";
 import { StimulusEditor } from "./stimulus-editor";
+import { DraftGenerator } from "./draft-generator";
 import { CommentsPanel, type StudyCommentRow } from "../comments-panel";
 
 const OPTION_TYPES = ["single_choice", "multiple_choice", "dropdown", "likert", "ranking"];
@@ -83,8 +84,8 @@ function answerChoices(question: Question | undefined, locale: Locale): LogicCho
   if (question.type === "rating") return range(question.scale?.min ?? 1, question.scale?.max ?? 5);
   if (question.type === "consent") {
     return [
-      { value: true, label: locale === "da" ? "Ja" : "Yes" },
-      { value: false, label: locale === "da" ? "Nej" : "No" },
+      { value: true, label: "Yes" },
+      { value: false, label: "No" },
     ];
   }
   if (question.type === "preference_test") {
@@ -122,10 +123,20 @@ const QUESTION_META: Record<Question["type"], { label: string; hint: string; ton
   matrix: { label: "Matrix", hint: "Rate several rows with the same answer scale.", tone: "bg-violet-100 text-violet-700" },
   ranking: { label: "Ranking", hint: "Ask participants to order options by preference.", tone: "bg-violet-100 text-violet-700" },
   consent: { label: "Agreement", hint: "Ask participants to accept or decline a statement.", tone: "bg-slate-100 text-slate-700" },
-  first_click: { label: "Design survey", hint: "Show a design and record the participant's first click.", tone: "bg-amber-100 text-amber-700" },
+  first_click: { label: "First-click test", hint: "Show an image and record the participant's first click.", tone: "bg-amber-100 text-amber-700" },
   preference_test: { label: "Preference test", hint: "Ask participants to choose their preferred design.", tone: "bg-violet-100 text-violet-700" },
   prototype_test: { label: "Prototype test", hint: "Capture a consent-aware path through a Figma prototype.", tone: "bg-cyan-100 text-cyan-800" },
 };
+
+function isAuthoringQuestionType(type: Question["type"]): boolean {
+  return (AUTHORING_QUESTION_TYPES as readonly string[]).includes(type);
+}
+
+function questionTypeOptions(currentType?: Question["type"]): Question["type"][] {
+  const types: Question["type"][] = [...AUTHORING_QUESTION_TYPES];
+  if (currentType && !isAuthoringQuestionType(currentType)) types.unshift(currentType);
+  return types;
+}
 
 function makeQuestion(type: Question["type"], existing: Question[]): Question {
   const base = type.replace(/[^a-z]/g, "_");
@@ -139,13 +150,13 @@ function makeQuestion(type: Question["type"], existing: Question[]): Question {
     required: type === "preference_test",
     ...(needsOptions(type) ? {
       options: [
-        { id: nextId("opt"), label: { da: "Mulighed 1", en: "Option 1" }, ...(type === "likert" ? { value: 1 } : {}) },
-        { id: nextId("opt"), label: { da: "Mulighed 2", en: "Option 2" }, ...(type === "likert" ? { value: 2 } : {}) },
+        { id: nextId("opt"), label: { da: "Option 1", en: "Option 1" }, ...(type === "likert" ? { value: 1 } : {}) },
+        { id: nextId("opt"), label: { da: "Option 2", en: "Option 2" }, ...(type === "likert" ? { value: 2 } : {}) },
       ],
     } : {}),
-    ...(type === "rating" ? { scale: { min: 0, max: 10, minLabel: { da: "Meget negativ", en: "Very negative" }, maxLabel: { da: "Meget positiv", en: "Very positive" } } } : {}),
+    ...(type === "rating" ? { scale: { min: 0, max: 10, minLabel: { da: "Very negative", en: "Very negative" }, maxLabel: { da: "Very positive", en: "Very positive" } } } : {}),
     ...(type === "matrix" ? {
-      rows: [{ id: nextId("row"), label: { da: "R\u00e6kke 1", en: "Row 1" } }],
+      rows: [{ id: nextId("row"), label: { da: "Row 1", en: "Row 1" } }],
       options: [
         { id: nextId("col"), label: { da: "1", en: "1" }, value: 1 },
         { id: nextId("col"), label: { da: "2", en: "2" }, value: 2 },
@@ -153,7 +164,7 @@ function makeQuestion(type: Question["type"], existing: Question[]): Question {
     } : {}),
     ...(type === "prototype_test" ? {
       required: true,
-      taskText: { da: "Gennemfør opgaven i prototypen.", en: "Complete the task in the prototype." },
+      taskText: { da: "Complete the task in the prototype.", en: "Complete the task in the prototype." },
       prototype: {
         provider: "figma" as const,
         flowType: "task" as const,
@@ -185,6 +196,7 @@ export function Builder({
   previewUrl,
   initialComments,
   canResolveComments,
+  currentUserId,
 }: {
   studyId: string;
   initialTitle: string;
@@ -192,16 +204,27 @@ export function Builder({
   previewUrl: string;
   initialComments: StudyCommentRow[];
   canResolveComments: boolean;
+  currentUserId: string;
 }) {
   const [definition, setDefinition] = useState(initialDefinition);
   const [studyTitle, setStudyTitle] = useState(initialTitle);
+  function changeTitle(value: string) {
+    editRevision.current += 1;
+    setStudyTitle(value);
+    setDirty(true);
+    setSaveMessage(null);
+  }
   const editingLocale: Locale = initialDefinition.defaultLanguage;
   const [sharePreviewUrl, setSharePreviewUrl] = useState(previewUrl);
   const [dirty, setDirty] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile" | null>(null);
   const [pending, startTransition] = useTransition();
-
+  const [saveCycle, setSaveCycle] = useState(0);
+  const editRevision = useRef(0);
+  const latestDraft = useRef({ definition, studyTitle });
+  const saveInFlight = useRef(false);
+  latestDraft.current = { definition, studyTitle };
   const questions = useMemo(() => definition.blocks.flatMap((block) => block.questions), [definition]);
   const questionNumbers = useMemo(() => {
     const numbers = new Map<string, string>();
@@ -216,6 +239,7 @@ export function Builder({
   const incompleteLogicCount = useMemo(() => displayLogicWarningCount(definition), [definition]);
 
   function mutate(change: (draft: InstrumentDefinition) => void) {
+    editRevision.current += 1;
     setDefinition((current) => {
       const copy = structuredClone(current);
       change(copy);
@@ -254,7 +278,7 @@ export function Builder({
     const id = nextId("block");
     mutate((draft) => draft.blocks.push({
       id,
-      title: { da: `Sektion ${draft.blocks.length + 1}`, en: `Section ${draft.blocks.length + 1}` },
+      title: { da: `Section ${draft.blocks.length + 1}`, en: `Section ${draft.blocks.length + 1}` },
       questions: [],
     }));
     requestAnimationFrame(() => document.getElementById(anchorFor(id))?.scrollIntoView({ behavior: "smooth" }));
@@ -308,27 +332,48 @@ export function Builder({
         const copy = cloneQuestion(question, [...all, ...questions]);
         questions.push(copy);
       }
-      const copy = { ...structuredClone(source), id: nextId("block"), title: { ...(source.title ?? {}), da: `${source.title?.da ?? "Sektion"} (kopi)` }, questions };
+      const copy = { ...structuredClone(source), id: nextId("block"), title: { ...(source.title ?? {}), da: `${source.title?.da ?? "Section"} (copy)` }, questions };
       draft.blocks.splice(index + 1, 0, copy);
     });
   }
-  function save() {
+  function persistDraft(snapshot: InstrumentDefinition, title: string, revision: number) {
     if (incompleteLogicCount > 0) {
       setSaveMessage(INCOMPLETE_LOGIC_CONDITION_MESSAGE);
       return;
     }
+    if (saveInFlight.current) return;
+    saveInFlight.current = true;
     startTransition(async () => {
       try {
-        const result = await updateDraft(studyId, definition, studyTitle);
-        setDirty(false);
-        setSharePreviewUrl(result.previewUrl);
-        setSaveMessage(result.problems.length === 0 ? "All changes saved" : `Saved with ${result.problems.length} validation warning(s)`);
+        const result = await updateDraft(studyId, snapshot, title);
+        if (editRevision.current === revision) {
+          setDirty(false);
+          setSharePreviewUrl(result.previewUrl);
+          setSaveMessage(result.problems.length === 0 ? "V1 draft saved automatically" : `V1 draft saved with ${result.problems.length} validation warning(s)`);
+        }
       } catch (error) {
-        setSaveMessage(error instanceof Error ? error.message : "Changes could not be saved");
+        if (editRevision.current === revision) setSaveMessage(error instanceof Error ? error.message : "Changes could not be saved");
+      } finally {
+        saveInFlight.current = false;
+        setSaveCycle((current) => current + 1);
       }
     });
   }
 
+  function save() {
+    persistDraft(structuredClone(definition), studyTitle, editRevision.current);
+  }
+
+  useEffect(() => {
+    if (!dirty || !studyTitle.trim() || incompleteLogicCount > 0) return;
+    const revision = editRevision.current;
+    const timer = window.setTimeout(() => {
+      if (saveInFlight.current) return;
+      const latest = latestDraft.current;
+      persistDraft(structuredClone(latest.definition), latest.studyTitle, revision);
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [dirty, definition, studyTitle, incompleteLogicCount, saveCycle]);
   return (
     <div className="-m-4 min-h-[calc(100vh-3.5rem)] bg-background md:-m-6">
       <header className="sticky top-0 z-30 flex min-h-16 flex-wrap items-center gap-3 bg-transparent px-4 py-3 md:px-6">
@@ -339,7 +384,7 @@ export function Builder({
         <span className="hidden h-6 w-px bg-slate-200 sm:block" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-slate-950">{studyTitle || "Untitled study"}</p>
-          <p className="text-xs text-slate-500">{dirty ? "Unsaved changes" : saveMessage ?? "Draft saved"}</p>
+          <p className="text-xs text-slate-500">{dirty ? "V1 draft · Saving automatically" : saveMessage ?? "V1 draft · Auto-saved"}</p>
         </div>
         {problems.length > 0 && <Badge tone="amber">{problems.length} warning{problems.length === 1 ? "" : "s"}</Badge>}
         <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
@@ -398,7 +443,7 @@ export function Builder({
                 studyId={studyId}
                 title={studyTitle}
                 definition={definition}
-                onTitleChange={(value) => { setStudyTitle(value); setDirty(true); setSaveMessage(null); }}
+                onTitleChange={changeTitle}
                 mutate={mutate}
               />
               <MessageSection
@@ -418,6 +463,7 @@ export function Builder({
                   block={block}
                   comments={initialComments}
                   canResolveComments={canResolveComments}
+                  currentUserId={currentUserId}
                   blockIndex={blockIndex}
                   locale={editingLocale}
                   allQuestions={questions}
@@ -470,6 +516,7 @@ function BuilderSidebar({ definition, locale }: { definition: InstrumentDefiniti
         <a href="#study-details" className="mt-2 flex items-center gap-2 rounded-lg bg-slate-200/70 px-3 py-2.5 text-sm font-semibold text-slate-900">
           <Icon name="details" /> Test details
         </a>
+        <QuestionTypeGuide />
         <div className="my-5 h-px bg-slate-200" />
         <p className="px-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Sections</p>
         <nav aria-label="Study sections" className="mt-2 space-y-1">
@@ -477,7 +524,7 @@ function BuilderSidebar({ definition, locale }: { definition: InstrumentDefiniti
           {definition.blocks.map((block, index) => {
             const hasDesign = block.questions.some((question) => question.type === "first_click");
             const hiddenCount = block.questions.filter((question) => question.hidden).length;
-            const title = block.title?.[locale] || block.title?.[locale === "da" ? "en" : "da"] || (hasDesign ? "Design survey" : "Survey questions");
+            const title = block.title?.[locale] || block.title?.[locale === "da" ? "en" : "da"] || (hasDesign ? "Visual task" : "Survey questions");
             return (
               <SidebarLink
                 key={block.id}
@@ -504,6 +551,21 @@ function BuilderSidebar({ definition, locale }: { definition: InstrumentDefiniti
   );
 }
 
+function QuestionTypeGuide() {
+  return (
+    <details className="mt-4 rounded-xl border border-slate-200 bg-white p-3">
+      <summary className="cursor-pointer text-xs font-semibold text-slate-800">Question type guide</summary>
+      <div className="mt-3 space-y-3">
+        {AUTHORING_QUESTION_TYPES.map((type) => (
+          <div key={type}>
+            <p className="text-xs font-semibold text-slate-800">{QUESTION_META[type].label}</p>
+            <p className="mt-0.5 text-[11px] leading-4 text-slate-500">{QUESTION_META[type].hint}</p>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
 function SidebarLink({
   href, label, tone, icon, hidden = false, hiddenCount = 0, drag = false,
 }: {
@@ -602,6 +664,9 @@ function StudyDetails({
             onChange={(asset) => mutate((draft) => { draft.contextStimulus = asset; })}
             onRemove={() => mutate((draft) => { draft.contextStimulus = undefined; })} />
         </div>
+        <div className="sm:col-span-2">
+          <DraftGenerator studyId={studyId} onApply={(nextDefinition) => mutate((draft) => { Object.assign(draft, nextDefinition); })} />
+        </div>
       </div>
     </section>
   );
@@ -619,8 +684,8 @@ function MessageSection({
   kind: "welcome" | "thanks";
 }) {
   const heading = kind === "welcome"
-    ? (locale === "da" ? "Velkommen" : "Welcome")
-    : (locale === "da" ? "Tak!" : "Thank you!");
+    ? "Welcome"
+    : "Thank you!";
   return (
     <section id={id} className="scroll-mt-24">
       <SectionHeading icon={icon}>{title}</SectionHeading>
@@ -643,7 +708,7 @@ function MessageSection({
           {kind === "welcome" && (
             <label className="block">
               <span className="mb-1.5 block text-xs font-semibold text-slate-700">Start button label</span>
-              <Input value={locale === "da" ? "Start unders\u00f8gelsen" : "Start study"} readOnly className="h-10 bg-slate-50 text-slate-600" />
+              <Input value="Start study" readOnly className="h-10 bg-slate-50 text-slate-600" />
             </label>
           )}
         </div>
@@ -684,6 +749,7 @@ function CommentPopover({
   studyId,
   comments,
   canResolve,
+  currentUserId,
   label,
   questionCode,
   sectionId,
@@ -691,6 +757,7 @@ function CommentPopover({
   studyId: string;
   comments: StudyCommentRow[];
   canResolve: boolean;
+  currentUserId: string;
   label: string;
   questionCode?: string;
   sectionId?: string;
@@ -718,6 +785,7 @@ function CommentPopover({
           questionCode={questionCode}
           sectionId={sectionId}
           canResolve={canResolve}
+          currentUserId={currentUserId}
         />
       </div>
     </details>
@@ -743,6 +811,7 @@ function StudySection({
   block,
   comments,
   canResolveComments,
+  currentUserId,
   blockIndex,
   locale,
   allQuestions,
@@ -763,6 +832,7 @@ function StudySection({
   block: InstrumentDefinition["blocks"][number];
   comments: StudyCommentRow[];
   canResolveComments: boolean;
+  currentUserId: string;
   blockIndex: number;
   locale: Locale;
   allQuestions: Question[];
@@ -784,7 +854,7 @@ function StudySection({
   const title = block.title?.[locale] ?? "";
   const hasLogic = Boolean(block.visibleIf?.length);
   const [logicOpen, setLogicOpen] = useState(hasLogic);
-  const fallbackTitle = hasDesign ? "Design survey" : "Survey questions";
+  const fallbackTitle = hasDesign ? "Visual task" : "Survey questions";
   return (
     <section id={anchorFor(block.id)} className="scroll-mt-24">
 
@@ -792,7 +862,7 @@ function StudySection({
         icon={hasDesign ? "image" : "question"}
         actions={
           <div className="flex items-center gap-2">
-            <CommentPopover studyId={studyId} comments={comments} canResolve={canResolveComments} label="Comment on section" sectionId={block.id} />
+            <CommentPopover studyId={studyId} comments={comments} canResolve={canResolveComments} currentUserId={currentUserId} label="Comment on section" sectionId={block.id} />
             <button
               type="button"
               onClick={() => {
@@ -858,6 +928,7 @@ function StudySection({
               questionNumbers={questionNumbers}
               comments={comments}
               canResolveComments={canResolveComments}
+              currentUserId={currentUserId}
               onChange={(patch) => onQuestionChange(question.code, patch)}
               onMoveUp={() => onMoveQuestion(questionIndex, -1)}
               onMoveDown={() => onMoveQuestion(questionIndex, 1)}
@@ -884,7 +955,7 @@ function StudySection({
 }
 
 function QuestionCard({
-  studyId, question, number, locale, allQuestions, questionNumbers, comments, canResolveComments, onChange, onMoveUp, onMoveDown, onRemove, onDuplicate, canMoveUp, canMoveDown,
+  studyId, question, number, locale, allQuestions, questionNumbers, comments, canResolveComments, currentUserId, onChange, onMoveUp, onMoveDown, onRemove, onDuplicate, canMoveUp, canMoveDown,
 }: {
   studyId: string;
   question: Question;
@@ -894,6 +965,7 @@ function QuestionCard({
   questionNumbers: ReadonlyMap<string, string>;
   comments: StudyCommentRow[];
   canResolveComments: boolean;
+  currentUserId: string;
   onChange: (patch: Partial<Question>) => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
@@ -931,9 +1003,9 @@ function QuestionCard({
           }}
           className="h-9 border-0 bg-slate-50 py-0 text-xs font-medium"
         >
-          {AUTHORING_QUESTION_TYPES.map((type) => <option key={type} value={type}>{QUESTION_META[type].label}</option>)}
+          {questionTypeOptions(question.type).map((type) => <option key={type} value={type} disabled={!isAuthoringQuestionType(type)}>{QUESTION_META[type].label}{isAuthoringQuestionType(type) ? "" : " (legacy)"}</option>)}
         </Select>
-        <CommentPopover studyId={studyId} comments={comments} canResolve={canResolveComments} label={"Comment on question " + question.code} questionCode={question.code} />
+        <CommentPopover studyId={studyId} comments={comments} canResolve={canResolveComments} currentUserId={currentUserId} label={"Comment on question " + question.code} questionCode={question.code} />
         <QuestionHeaderToolbar
           number={number}
           required={question.required}
@@ -1058,7 +1130,7 @@ function QuestionBody({ studyId, question, locale, onChange }: { studyId: string
         {helpTextOpen && <div className="mt-3"><LocalizedField label="Help text" locale={locale} value={question.helpText ?? {}} onChange={(helpText) => onChange({ helpText })} placeholder="Optional explanation shown below the question" /></div>}
       </div>
       <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-        <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-800">Question image</p><p className="mt-0.5 text-[11px] text-slate-500">Optional image shown with question.</p></div><Toggle checked={imageAttachmentOpen} onChange={(open) => { setImageAttachmentOpen(open); if (!open) onChange({ stimuli: undefined }); }} aria-label="Enable question image" /></div>
+        <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-800">Question image</p><p className="mt-0.5 text-[11px] text-slate-500">Optional image shown with question. New images are hidden until enabled.</p></div><Toggle checked={imageAttachmentOpen} onChange={(open) => { setImageAttachmentOpen(open); const existing = question.stimuli?.[0]; if (existing && !open) onChange({ stimuli: [{ ...existing, enabled: false }] }); }} aria-label="Enable question image" /></div>
         {imageAttachmentOpen && <div className="mt-3"><StimulusEditor studyId={studyId} kind="context" label="Question image" value={question.stimuli?.[0] ?? null}
           onChange={(asset) => onChange({ stimuli: [asset] })}
           onRemove={question.stimuli?.length ? () => onChange({ stimuli: undefined }) : undefined} /></div>}
@@ -1335,12 +1407,42 @@ function OptionsEditor({ question, locale, onChange }: { question: Question; loc
           Randomize order of choices
         </label>
       </div>
-      {question.type === "multiple_choice" && (
-        <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-          <label className="flex items-center gap-2 text-xs font-semibold text-slate-700"><input type="checkbox" checked={question.multipleSelectLimit !== undefined} onChange={(event) => onChange({ multipleSelectLimit: event.target.checked ? Math.min(3, Math.max(1, options.length)) : undefined })} /> Limit number of selections</label>
-          {question.multipleSelectLimit !== undefined && <div className="mt-2 flex items-center gap-2"><Input type="number" min={1} max={Math.max(1, options.length)} value={question.multipleSelectLimit} onChange={(event) => onChange({ multipleSelectLimit: Math.min(Math.max(1, Number(event.target.value) || 1), Math.max(1, options.length)) })} className="h-9 w-24" /><span className="text-[11px] text-slate-500">Participants can choose up to this many.</span></div>}
-        </div>
-      )}
+      {question.type === "multiple_choice" && (() => {
+        const limitsEnabled = question.multipleSelectMinLimit !== undefined || question.multipleSelectLimit !== undefined;
+        const minimum = question.multipleSelectMinLimit ?? 0;
+        const maximum = question.multipleSelectLimit ?? options.length;
+        return (
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+            <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+              <input
+                type="checkbox"
+                checked={limitsEnabled}
+                onChange={(event) => {
+                  if (event.target.checked) {
+                    onChange({ multipleSelectMinLimit: 1, multipleSelectLimit: Math.max(1, Math.min(3, options.length)) });
+                  } else {
+                    onChange({ multipleSelectMinLimit: undefined, multipleSelectLimit: undefined });
+                  }
+                }}
+              />
+              Set selection limits
+            </label>
+            {limitsEnabled && (
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <label className="block text-xs text-slate-600">
+                  <span className="mb-1 block font-medium">Minimum selections</span>
+                  <Input type="number" min={0} max={Math.max(0, options.length)} value={minimum} onChange={(event) => onChange({ multipleSelectMinLimit: Math.max(0, Math.min(options.length, Number(event.target.value) || 0)) })} />
+                </label>
+                <label className="block text-xs text-slate-600">
+                  <span className="mb-1 block font-medium">Maximum selections</span>
+                  <Input type="number" min={1} max={Math.max(1, options.length)} value={maximum} onChange={(event) => onChange({ multipleSelectLimit: Math.max(1, Math.min(options.length, Number(event.target.value) || 1)) })} />
+                </label>
+                <p className="text-[11px] text-slate-500 sm:col-span-2">Participants can choose between the minimum and maximum. Leave minimum at 0 for an optional choice.</p>
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
