@@ -60,7 +60,6 @@ export const AUTHORING_QUESTION_TYPES = [
   "long_text",
   "number",
   "rating",
-  "likert",
   "ranking",
   "preference_test",
   "prototype_test",

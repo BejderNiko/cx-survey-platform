@@ -13,6 +13,7 @@ type DatabaseReadiness = {
   sectionComments: boolean;
   mediaAssets: boolean;
   recruitmentPages: boolean;
+  recruitmentQuestionSchema: boolean;
   importLifecycle: boolean;
   importCommitting: boolean;
 };
@@ -23,6 +24,18 @@ async function databaseReadiness(): Promise<DatabaseReadiness> {
       select
         to_regclass('public.media_assets') is not null as media_assets,
         to_regclass('public.recruitment_pages') is not null as recruitment_pages,
+        (
+          to_regclass('public.recruitment_page_questions') is not null
+          and (select count(*) = 6 from information_schema.columns
+               where table_schema = 'public' and table_name = 'recruitment_page_questions'
+                 and column_name in ('org_id', 'recruitment_page_id', 'custom_field_id', 'source_key', 'position', 'required'))
+          and exists (select 1 from pg_constraint
+                      where conrelid = 'public.recruitment_page_questions'::regclass
+                        and conname = 'recruitment_page_questions_source_shape')
+          and exists (select 1 from pg_indexes
+                      where schemaname = 'public' and tablename = 'recruitment_page_questions'
+                        and indexname = 'recruitment_page_questions_source_uidx')
+        ) as recruitment_question_schema,
         (
           select count(*) = 6
           from information_schema.columns
@@ -52,6 +65,7 @@ async function databaseReadiness(): Promise<DatabaseReadiness> {
         ) as import_committing_status
     `;
     const mediaAssets = Boolean(schema?.media_assets);
+    const recruitmentQuestionSchema = Boolean(schema?.recruitment_question_schema);
     const recruitmentPages = Boolean(schema?.recruitment_pages);
     const commentsThreading = Boolean(schema?.comments_threading);
     const sectionComments = Boolean(schema?.section_comments);
@@ -59,7 +73,7 @@ async function databaseReadiness(): Promise<DatabaseReadiness> {
     const importCommitting = Boolean(schema?.import_committing_status);
     const studiesReady = Boolean(mediaAssets && commentsThreading);
     const ready = Boolean(studiesReady && importLifecycle && importCommitting);
-    const complete = Boolean(ready && sectionComments && recruitmentPages);
+    const complete = Boolean(ready && sectionComments && recruitmentPages && recruitmentQuestionSchema);
     return {
       ready,
       studiesReady,
@@ -68,6 +82,7 @@ async function databaseReadiness(): Promise<DatabaseReadiness> {
       sectionComments,
       mediaAssets,
       recruitmentPages,
+      recruitmentQuestionSchema,
       importLifecycle,
       importCommitting,
     };
@@ -80,6 +95,7 @@ async function databaseReadiness(): Promise<DatabaseReadiness> {
       sectionComments: false,
       mediaAssets: false,
       recruitmentPages: false,
+      recruitmentQuestionSchema: false,
       importLifecycle: false,
       importCommitting: false,
     };
@@ -101,6 +117,7 @@ export async function GET() {
           sectionComments: false,
           mediaAssets: false,
           recruitmentPages: false,
+          recruitmentQuestionSchema: false,
           importLifecycle: false,
           importCommitting: false,
         },

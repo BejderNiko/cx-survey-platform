@@ -68,7 +68,7 @@ function serializeValue(value: unknown): string {
   return typeof value === "object" ? JSON.stringify(value) : String(value);
 }
 
-export function csvCell(value: unknown): string {
+function csvCell(value: unknown): string {
   let text = String(value ?? "");
   if (/^[=+\-@]/.test(text)) text = `'${text}`;
   return `"${text.replaceAll('"', '""')}"`;

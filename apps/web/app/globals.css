@@ -10,15 +10,27 @@
   --muted: #6e6f73;
   --border: #e6d9d2;
   --border-strong: #bfb2aa;
-  --accent: #ff3c3c;
-  --accent-hover: #8c0000;
-  --accent-soft: #fde0dc;
-  --accent-wash: #fff7f4;
+  --accent: #460019;
+  --accent-hover: #2b0010;
+  --accent-soft: #f1dce4;
+  --accent-wash: #fff7fa;
   --danger: #8c0000;
   --warning: #9b6500;
   --success: #287653;
   --shadow-card: 0 1px 2px rgb(70 0 25 / 0.06);
   --shadow-pop: 0 8px 24px -8px rgb(70 0 25 / 0.2);
+}
+
+/* Environment toggle. Rollback: NEXT_PUBLIC_UI_THEME=classic and redeploy. */
+[data-ui-theme="modern"] {
+  --background: #fbf8f7;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --foreground: #40353a;
+  --border: #eadfe3;
+  --border-strong: #cbbbc2;
+  --shadow-card: 0 8px 24px rgb(70 0 25 / 0.07);
+  --shadow-pop: 0 18px 45px -18px rgb(70 0 25 / 0.28);
 }
 
 @theme inline {
@@ -37,7 +49,7 @@
   --color-danger: var(--danger);
   --color-warning: var(--warning);
   --color-success: var(--success);
-  --font-sans: Arial, "Segoe UI", system-ui, sans-serif;
+  --font-sans: "DM Sans", "Segoe UI", Arial, system-ui, sans-serif;
   --font-display: Georgia, "Times New Roman", serif;
   --font-mono: "Cascadia Mono", ui-monospace, monospace;
   --shadow-card: var(--shadow-card);

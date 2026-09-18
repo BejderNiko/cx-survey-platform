@@ -4,6 +4,7 @@ import { Card, EmptyState, LinkButton } from "@/components/ui";
 import { requireSession } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { listRecruitmentPages, listWorkspaces } from "./actions";
+import { recruitmentSchemaMessage } from "./schema-status";
 import { CreateRecruitmentPageForm } from "./recruitment-create-form";
 import { RecruitmentRow } from "./recruitment-row";
 
@@ -17,7 +18,14 @@ export default async function RecruitmentPage({
   const canManage = can(session.role, "recruitment.manage");
   const showCreate = canManage && sp.ny !== undefined;
 
-  const [pages, workspaces] = await Promise.all([listRecruitmentPages(), listWorkspaces()]);
+  let pages: Awaited<ReturnType<typeof listRecruitmentPages>> = [];
+  let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
+  let schemaError: string | null = null;
+  try {
+    [pages, workspaces] = await Promise.all([listRecruitmentPages(), listWorkspaces()]);
+  } catch (error) {
+    schemaError = recruitmentSchemaMessage(error) ?? "Rekruttering kunne ikke indlæses. Prøv igen eller kontakt en administrator.";
+  }
 
   return (
     <div className="space-y-4">
@@ -33,7 +41,12 @@ export default async function RecruitmentPage({
         )}
       </div>
 
-      {showCreate && (
+      {schemaError ? (
+        <Card title="Rekruttering ikke klar">
+          <p role="alert" className="text-sm text-danger">{schemaError}</p>
+          <p className="mt-2 text-xs text-muted">Siden har ikke ændret data. Kontrollér environment readiness før ny prøve.</p>
+        </Card>
+      ) : showCreate && (
         <Card
           title="Opret rekrutteringsside"
           actions={<Link href="/panel/recruitment" className="text-xs text-muted hover:text-accent hover:underline">Luk</Link>}
@@ -42,7 +55,7 @@ export default async function RecruitmentPage({
         </Card>
       )}
 
-      <div className="space-y-3">
+      {!schemaError && <div className="space-y-3">
         {pages.map((p) => (
           <RecruitmentRow
             key={p.id}
@@ -62,7 +75,7 @@ export default async function RecruitmentPage({
             action={canManage ? <LinkButton href="/panel/recruitment?ny=1" variant="primary">+ Opret side</LinkButton> : undefined}
           />
         )}
-      </div>
+      </div>}
     </div>
   );
 }

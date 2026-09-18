@@ -15,15 +15,21 @@ type AvailableDataset = {
 type RDataset = { datasetId: string; versionNumber: number; rowCount: number; payload: DatasetPayload };
 type ROutput = { type: string; data: unknown };
 type RCapture = { output: ROutput[]; images: ImageBitmap[] };
+type RShelter = {
+  captureR: (code: string, options?: Record<string, unknown>) => Promise<RCapture>;
+  purge: () => Promise<void>;
+};
 type RSession = {
   init: () => Promise<void>;
   evalRVoid: (code: string) => Promise<void>;
   FS: { writeFile: (path: string, data: Uint8Array) => Promise<void> };
-  Shelter: new () => { captureR: (code: string, options?: Record<string, unknown>) => Promise<RCapture>; purge: () => void };
+  Shelter: new () => Promise<RShelter>;
 };
 type RModule = { WebR: new (options?: Record<string, unknown>) => RSession };
 
+// Pin runtime. Upgrade only after browser smoke of calculation and plot.
 const WEBR_URL = "https://webr.r-wasm.org/v0.4.2/webr.mjs";
+const WEBR_TIMEOUT_MS = 20_000;
 const INITIAL_CODE = `# survey_data contains selected dataset
 summary(survey_data)
 
@@ -35,8 +41,21 @@ if (any(numeric_columns)) {
 
 function loadWebR(): Promise<RModule> {
   // Runtime stays outside Next bundle and loads only when user opens R.
+
   const dynamicImport = new Function("url", "return import(url)") as (url: string) => Promise<RModule>;
   return dynamicImport(WEBR_URL);
+}
+
+async function withWebRTimeout<T>(work: Promise<T>, message: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<T>((_, reject) => { timeout = setTimeout(() => reject(new Error(message)), WEBR_TIMEOUT_MS); }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 function csvValue(value: unknown): string {
@@ -64,6 +83,11 @@ function outputText(output: ROutput): string {
   if (output.type === "warning") return "R warning";
   return String(output.data ?? "");
 }
+function webRErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.includes("timed out")) return error.message;
+  return fallback;
+}
+
 
 function RPlot({ image }: { image: ImageBitmap }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -94,10 +118,10 @@ export function RWorkbench({ datasets, canRun }: { datasets: AvailableDataset[];
     if (runtimeRef.current) return runtimeRef.current;
     setStatus("loading");
     setMessage("Loading R runtime…");
-    const webRModule = await loadWebR();
+    const webRModule = await withWebRTimeout(loadWebR(), "R runtime timed out while loading.");
     const runtime = new webRModule.WebR({ interactive: false });
-    await runtime.init();
-    await runtime.evalRVoid("webr::canvas_install(width=720, height=420, bg='white')");
+    await withWebRTimeout(runtime.init(), "R runtime timed out while starting.");
+    await withWebRTimeout(runtime.evalRVoid("webr::canvas_install(width=720, height=420, bg='white')"), "R graphics setup timed out.");
     runtimeRef.current = runtime;
     return runtime;
   }
@@ -112,6 +136,12 @@ export function RWorkbench({ datasets, canRun }: { datasets: AvailableDataset[];
     setMessage("Loading dataset into R workspace…");
     try {
       const nextDataset = await loadRDataset(selectedVersionId);
+      if (nextDataset.rowCount === 0) {
+        setDataset(null);
+        setStatus("ready");
+        setMessage("Selected dataset has no rows. Choose a dataset with responses before running R.");
+        return;
+      }
       const runtime = await ensureRuntime();
       await runtime.FS.writeFile("/home/web_user/survey_data.csv", new TextEncoder().encode(datasetCsv(nextDataset.payload)));
       await runtime.evalRVoid('survey_data <- read.csv("/home/web_user/survey_data.csv", stringsAsFactors = FALSE, check.names = FALSE)');
@@ -120,7 +150,7 @@ export function RWorkbench({ datasets, canRun }: { datasets: AvailableDataset[];
       setMessage(`Loaded ${nextDataset.rowCount.toLocaleString("da-DK")} rows into survey_data.`);
     } catch (error) {
       setStatus("error");
-      setMessage(error instanceof Error ? error.message : "Dataset could not be loaded into R.");
+      setMessage(webRErrorMessage(error, "Dataset could not be loaded into R."));
     }
   }
 
@@ -133,7 +163,7 @@ export function RWorkbench({ datasets, canRun }: { datasets: AvailableDataset[];
     setMessage(null);
     setOutput([]);
     setImages([]);
-    let shelter: { captureR: (code: string, options?: Record<string, unknown>) => Promise<RCapture>; purge: () => void } | null = null;
+    let shelter: RShelter | null = null;
     try {
       const runtime = await ensureRuntime();
       if (dataset) {
@@ -142,17 +172,19 @@ export function RWorkbench({ datasets, canRun }: { datasets: AvailableDataset[];
       } else {
         await runtime.evalRVoid("survey_data <- data.frame()");
       }
-      shelter = new runtime.Shelter();
-      const capture = await shelter.captureR(code, { captureGraphics: { width: 720, height: 420, bg: "white" } });
+      shelter = await new runtime.Shelter();
+      const capture = await withWebRTimeout(shelter.captureR(code, { captureGraphics: { width: 720, height: 420, bg: "white" } }), "R calculation timed out after 20 seconds.");
       setOutput(capture.output.map(outputText).filter(Boolean));
       setImages(capture.images);
       setStatus("ready");
       setMessage(`R completed${dataset ? ` on ${dataset.rowCount.toLocaleString("da-DK")} rows` : ""}.`);
     } catch (error) {
       setStatus("error");
-      setMessage(error instanceof Error ? error.message : "R code failed.");
+      setMessage(webRErrorMessage(error, "R calculation failed. Check the R code and try again."));
     } finally {
-      shelter?.purge();
+      try {
+        await shelter?.purge();
+      } catch {}
     }
   }
 

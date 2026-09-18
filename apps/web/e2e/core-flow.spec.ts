@@ -12,7 +12,7 @@ async function signIn(page: import("@playwright/test").Page, email: string) {
   await page.fill("#email", email);
   await page.fill("#password", "demo1234!");
   await page.click("button[type=submit]");
-  await page.waitForURL("**/home");
+  await page.waitForURL("**/studies");
 }
 
 test.describe("roller og adgang", () => {
@@ -28,6 +28,13 @@ test.describe("roller og adgang", () => {
     await page.goto("/admin");
     await expect(page.locator("h1")).toContainText("Administration");
     await expect(page.getByText("Aktivitetslog")).toBeVisible();
+  });
+
+  test("ejer åbner rekruttering uden ukontrolleret fejl", async ({ page }) => {
+    await signIn(page, "owner@example.invalid");
+    await page.goto("/panel/recruitment");
+    await expect(page.getByRole("heading", { name: "Rekruttering" })).toBeVisible();
+    await expect(page.getByRole("alert")).toHaveCount(0);
   });
 
   test("læser ser studier skrivebeskyttet (ingen builder-/publicér-knapper)", async ({ page }) => {

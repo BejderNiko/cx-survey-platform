@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { can, type Action } from "@ok/domain";
-import { IconChart, IconCog, IconHome, IconPanel, IconStudy } from "@/components/icons";
+import { IconChart, IconCog, IconPanel, IconStudy } from "@/components/icons";
 import { destroySession, requireSession } from "@/lib/auth";
 import { t, type UiKey } from "@/lib/i18n";
 import { ROLE_LABEL, label } from "@/lib/labels";
@@ -15,7 +15,6 @@ async function signOut() {
 }
 
 const NAV: { href: string; key: UiKey; icon: ReactNode; requires?: Action }[] = [
-  { href: "/home", key: "nav_home", icon: <IconHome /> },
   { href: "/studies", key: "nav_studies", icon: <IconStudy />, requires: "studies.view" },
   { href: "/panel", key: "nav_panel", icon: <IconPanel />, requires: "panel.view" },
   { href: "/analytics", key: "nav_analytics", icon: <IconChart />, requires: "analytics.view" },

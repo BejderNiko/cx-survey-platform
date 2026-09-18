@@ -39,6 +39,7 @@ export function FeedbackWidget() {
   const [description, setDescription] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const captureRef = useRef<HTMLDivElement>(null);
+  const [pending, setPending] = useState(false);
   const startRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
@@ -113,20 +114,29 @@ export function FeedbackWidget() {
   }
 
   async function submit() {
+    if (pending) return;
     const sourceType = target ? "feedback" : "manual";
-    const result = await createFeatureRequest({
-      title,
-      description,
-      sourceType,
-      sourcePath: window.location.pathname,
-      section: target?.id || target?.tagName || "page",
-      targetSnapshot: target ?? { sourceType: "manual" },
-    });
-    setMessage(result.ok ? "Feedback added to feature requests." : result.error);
-    if (result.ok) {
-      setDescription("");
-      setTarget(null);
-      setTitle("");
+    setPending(true);
+    setMessage(null);
+    try {
+      const result = await createFeatureRequest({
+        title,
+        description,
+        sourceType,
+        sourcePath: window.location.pathname,
+        section: target?.id || target?.tagName || "page",
+        targetSnapshot: target ?? { sourceType: "manual" },
+      });
+      setMessage(result.ok ? "Feedback added to feature requests." : result.error);
+      if (result.ok) {
+        setDescription("");
+        setTarget(null);
+        setTitle("");
+      }
+    } catch {
+      setMessage("Feedback could not be sent. Try again.");
+    } finally {
+      setPending(false);
     }
   }
 
@@ -156,7 +166,7 @@ export function FeedbackWidget() {
               <button type="button" className="text-xs text-muted underline" onClick={() => { setOpen(false); setSelecting(false); }}>Close</button>
             </div>
             <p className="mt-1 text-xs leading-5 text-muted">Drag over the part of page you want to comment on, like a clipping tool.</p>
-            <Button size="sm" variant="secondary" className="mt-3" onClick={() => { setMessage(null); setSelecting(true); }}>{target ? "Capture another area" : "Capture UI area"}</Button>
+            <Button size="sm" variant="secondary" className="mt-3" disabled={pending} onClick={() => { setMessage(null); setSelecting(true); }}>{target ? "Capture another area" : "Capture UI area"}</Button>
             {target && (
               <div className="mt-2 rounded-lg border border-accent/20 bg-accent-wash px-3 py-2 text-xs">
                 <p className="font-medium text-heading">Captured: {target.tagName}{target.id ? `#${target.id}` : ""}</p>
@@ -165,7 +175,7 @@ export function FeedbackWidget() {
             )}
             <Input className="mt-3" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Short title" maxLength={160} />
             <Textarea className="mt-2" rows={4} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What should improve?" maxLength={5000} />
-            <Button className="mt-2" disabled={!title.trim() || !description.trim()} onClick={submit}>Add to feature requests</Button>
+            <Button className="mt-2" disabled={pending || !title.trim() || !description.trim()} onClick={submit}>{pending ? "Sending…" : "Add to feature requests"}</Button>
             {message && <p role="status" className="mt-2 text-xs text-muted">{message}</p>}
           </div>
         )}

@@ -11,7 +11,7 @@ async function login(formData: FormData) {
     redirect("/login?error=1");
   }
   await createSessionCookie(user);
-  redirect("/home");
+  redirect("/studies");
 }
 
 export default async function LoginPage({
@@ -20,7 +20,7 @@ export default async function LoginPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const session = await getSession();
-  if (session) redirect("/home");
+  if (session) redirect("/studies");
   const { error } = await searchParams;
 
   return (

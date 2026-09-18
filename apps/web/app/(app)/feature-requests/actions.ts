@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { audit } from "@/lib/audit";
 import { withAuthorized } from "@/lib/auth";
+import { featureRequestErrorMessage } from "./error-message";
 
 const STATUSES = new Set(["new", "planned", "in_progress", "done", "declined"]);
 
@@ -26,7 +27,7 @@ export async function createFeatureRequest(input: { title: string; description: 
       await audit(tx, { orgId: session.orgId, actorUserId: session.userId, action: "feature_request.create", entityType: "feature_request", entityId: String(request.id), details: { titleLength: title.length, descriptionLength: description.length } });
     });
   } catch (error) {
-    return { ok: false, error: schemaMessage(error) };
+    return { ok: false, error: featureRequestErrorMessage(error) };
   }
   revalidatePath("/feature-requests");
   return { ok: true };
@@ -53,13 +54,8 @@ export async function updateFeatureRequest(input: { id: string; status: string; 
       await audit(tx, { orgId: session.orgId, actorUserId: session.userId, action: "feature_request.update", entityType: "feature_request", entityId: input.id, details: { status: input.status, ownerId } });
     });
   } catch (error) {
-    return { ok: false, error: schemaMessage(error) };
+    return { ok: false, error: featureRequestErrorMessage(error) };
   }
   revalidatePath("/feature-requests");
   return { ok: true };
-}
-
-function schemaMessage(error: unknown): string {
-  if (error && typeof error === "object" && "code" in error && (error.code === "42P01" || error.code === "42703")) return "Feature request storage is not available in this environment.";
-  return error instanceof Error ? error.message : "Handlingen mislykkedes.";
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import {
   INCOMPLETE_LOGIC_CONDITION_MESSAGE,
   AUTHORING_QUESTION_TYPES,
@@ -22,7 +22,9 @@ import { StimulusEditor } from "./stimulus-editor";
 import { DraftGenerator } from "./draft-generator";
 import { CommentsPanel, type StudyCommentRow } from "../comments-panel";
 
-const OPTION_TYPES = ["single_choice", "multiple_choice", "dropdown", "likert", "ranking"];
+// Likert remains in the instrument schema for published, immutable studies.
+// It is intentionally absent here: new drafts must not create it.
+const OPTION_TYPES = ["single_choice", "multiple_choice", "dropdown", "ranking"];
 
 let uid = 0;
 const nextId = (prefix: string) => `${prefix}${Date.now().toString(36)}${(uid++).toString(36)}`;
@@ -224,7 +226,9 @@ export function Builder({
   const editRevision = useRef(0);
   const latestDraft = useRef({ definition, studyTitle });
   const saveInFlight = useRef(false);
-  latestDraft.current = { definition, studyTitle };
+  useEffect(() => {
+    latestDraft.current = { definition, studyTitle };
+  }, [definition, studyTitle]);
   const questions = useMemo(() => definition.blocks.flatMap((block) => block.questions), [definition]);
   const questionNumbers = useMemo(() => {
     const numbers = new Map<string, string>();
@@ -336,7 +340,7 @@ export function Builder({
       draft.blocks.splice(index + 1, 0, copy);
     });
   }
-  function persistDraft(snapshot: InstrumentDefinition, title: string, revision: number) {
+  const persistDraft = useCallback((snapshot: InstrumentDefinition, title: string, revision: number) => {
     if (incompleteLogicCount > 0) {
       setSaveMessage(INCOMPLETE_LOGIC_CONDITION_MESSAGE);
       return;
@@ -358,7 +362,7 @@ export function Builder({
         setSaveCycle((current) => current + 1);
       }
     });
-  }
+  }, [incompleteLogicCount, startTransition, studyId]);
 
   function save() {
     persistDraft(structuredClone(definition), studyTitle, editRevision.current);
@@ -373,7 +377,7 @@ export function Builder({
       persistDraft(structuredClone(latest.definition), latest.studyTitle, revision);
     }, 800);
     return () => window.clearTimeout(timer);
-  }, [dirty, definition, studyTitle, incompleteLogicCount, saveCycle]);
+  }, [dirty, definition, studyTitle, incompleteLogicCount, persistDraft, saveCycle]);
   return (
     <div className="-m-4 min-h-[calc(100vh-3.5rem)] bg-background md:-m-6">
       <header className="sticky top-0 z-30 flex min-h-16 flex-wrap items-center gap-3 bg-transparent px-4 py-3 md:px-6">
@@ -862,7 +866,7 @@ function StudySection({
         icon={hasDesign ? "image" : "question"}
         actions={
           <div className="flex items-center gap-2">
-            <CommentPopover studyId={studyId} comments={comments} canResolve={canResolveComments} currentUserId={currentUserId} label="Comment on section" sectionId={block.id} />
+            <CommentPopover studyId={studyId} comments={comments} canResolve={canResolveComments} currentUserId={currentUserId} label="Comment on" sectionId={block.id} />
             <button
               type="button"
               onClick={() => {
@@ -1005,7 +1009,7 @@ function QuestionCard({
         >
           {questionTypeOptions(question.type).map((type) => <option key={type} value={type} disabled={!isAuthoringQuestionType(type)}>{QUESTION_META[type].label}{isAuthoringQuestionType(type) ? "" : " (legacy)"}</option>)}
         </Select>
-        <CommentPopover studyId={studyId} comments={comments} canResolve={canResolveComments} currentUserId={currentUserId} label={"Comment on question " + question.code} questionCode={question.code} />
+        <CommentPopover studyId={studyId} comments={comments} canResolve={canResolveComments} currentUserId={currentUserId} label="Comment on" questionCode={question.code} />
         <QuestionHeaderToolbar
           number={number}
           required={question.required}
@@ -1622,6 +1626,23 @@ function AnswerValueControl({
   onChange: (value: unknown) => void;
 }) {
   if (op === "answered" || op === "not_answered") return null;
+  if (target?.type === "rating") {
+    const min = target.scale?.min ?? 1;
+    const max = target.scale?.max ?? 5;
+    return (
+      <Input
+        aria-label="Answer"
+        type="number"
+        min={min}
+        max={max}
+        step="1"
+        value={value === undefined || value === null ? "" : String(value)}
+        placeholder={`${min}–${max}`}
+        onChange={(event) => onChange(event.target.value === "" ? "" : Number(event.target.value))}
+        className="h-9 min-w-32 flex-1 text-xs"
+      />
+    );
+  }
   const choices = answerChoices(target, locale);
   if ((target?.type === "multiple_choice" || op === "in" || op === "not_in") && choices.length > 0) {
     return <MultipleAnswerChoice value={value} choices={choices} onChange={onChange} />;

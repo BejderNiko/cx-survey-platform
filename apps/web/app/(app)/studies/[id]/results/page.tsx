@@ -31,7 +31,7 @@ export default async function ResultsPageV2({
 }
 
 /** Historical renderer retained temporarily for comparison during Preview QA. */
-export async function LegacyResultsPage({
+async function LegacyResultsPage({
   params,
   searchParams,
 }: {

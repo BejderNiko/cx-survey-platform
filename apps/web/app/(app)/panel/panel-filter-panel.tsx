@@ -79,6 +79,7 @@ export function PanelFilterPanel({
   const [pending, startTransition] = useTransition();
   const filterSignature = useMemo(() => serializeFilterGroups(groups), [groups]);
   const lastAutoAppliedSignature = useRef(filterSignature);
+  const navigationGeneration = useRef(0);
 
   function addGroup(filterField: FilterField) {
     const values = filterField.key === "age" ? ["", ""] : [];
@@ -93,6 +94,16 @@ export function PanelFilterPanel({
 
   function removeGroup(id: string) {
     setGroups((current) => current.filter((group) => group.id !== id));
+  }
+
+  function clearFilters() {
+    // A queued auto-apply from an old selector state must not restore filters.
+    navigationGeneration.current += 1;
+    lastAutoAppliedSignature.current = serializeFilterGroups([]);
+    setGroups([]);
+    setFieldChoice("");
+    setOpen(false);
+    startTransition(() => router.replace("/panel", { scroll: false }));
   }
 
   function toggleValue(group: PanelFilterGroup, value: string) {
@@ -126,7 +137,9 @@ export function PanelFilterPanel({
     onFiltersChange?.(filterSignature);
     if (!navigation || !panelUrl || lastAutoAppliedSignature.current === filterSignature) return;
     lastAutoAppliedSignature.current = filterSignature;
+    const generation = navigationGeneration.current;
     const timer = window.setTimeout(() => {
+      if (generation !== navigationGeneration.current) return;
       startTransition(() => router.replace(panelUrl, { scroll: false }));
     }, 300);
     return () => window.clearTimeout(timer);
@@ -153,12 +166,15 @@ export function PanelFilterPanel({
           <p className="text-sm font-semibold text-heading">Panelist selector</p>
           <p className="mt-1 text-xs text-muted">Build one or more filter groups. Groups combine with AND.</p>
         </div>
-        <Button type="button" variant="secondary" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
-          <span aria-hidden>⌘</span> Filter panelists
-        </Button>
+        <div className="flex items-center gap-2">
+          {(groups.length > 0 || searchParams.size > 0) && <Button type="button" variant="ghost" onClick={clearFilters} disabled={pending}>Ryd filtre</Button>}
+          <Button type="button" variant="secondary" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+            <span aria-hidden>⌘</span> Filter panelists
+          </Button>
+        </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-3 gap-2 sm:gap-3">
+      <div className="mx-auto mt-4 grid max-w-sm grid-cols-2 gap-2 sm:gap-3">
         <div className="rounded-xl border border-line bg-surface px-3 py-3"><p className="text-[11px] uppercase tracking-wide text-muted">panelists</p><p className="mt-1 text-xl font-semibold text-heading">{total}</p></div>
         <div className="rounded-xl border border-line bg-surface px-3 py-3"><p className="text-[11px] uppercase tracking-wide text-muted">filtered</p><p className="mt-1 text-xl font-semibold text-heading">{filtered === null ? "-" : filtered}</p></div>
       </div>
