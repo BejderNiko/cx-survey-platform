@@ -55,12 +55,13 @@ function ImageField({
 }
 
 export function RecruitmentEditor({
-  page, questions: initialQuestions, availableFields: initialAvailable, availableFilterQuestions,
+  page, questions: initialQuestions, availableFields: initialAvailable, availableFilterQuestions, nativeFilterQuestionsAvailable,
 }: {
   page: RecruitmentPageDetail;
   questions: QuestionRow[];
   availableFields: AvailableField[];
   availableFilterQuestions: { key: string; label: string; fieldType: string; options: readonly string[] }[];
+  nativeFilterQuestionsAvailable: boolean;
 }) {
   const router = useRouter();
   const [form, setForm] = useState({
@@ -270,7 +271,13 @@ export function RecruitmentEditor({
           {initialQuestions.length === 0 && <li className="text-sm text-muted">Ingen spørgsmål tilføjet endnu.</li>}
         </ul>
 
-        {availableFilterQuestions.length > 0 && <div className="rounded-lg border border-accent/20 bg-accent-soft/30 p-3">
+        {!nativeFilterQuestionsAvailable && (
+          <p role="status" className="rounded-lg border border-line bg-surface-raised p-3 text-xs text-muted">
+            Panelfilterspørgsmål bliver tilgængelige efter næste databaseopdatering. Egne rekrutteringsspørgsmål virker fortsat.
+          </p>
+        )}
+
+        {nativeFilterQuestionsAvailable && availableFilterQuestions.length > 0 && <div className="rounded-lg border border-accent/20 bg-accent-soft/30 p-3">
           <Label htmlFor="rp-add-filter-q">Add from panel filters</Label>
           <div className="mt-2 flex flex-wrap items-end gap-2">
             <Select id="rp-add-filter-q" value={newFilterQuestion} onChange={(e) => setNewFilterQuestion(e.target.value)}><option value="">Choose panel filter question…</option>{availableFilterQuestions.map((field) => <option key={field.key} value={field.key}>{field.label}</option>)}</Select>

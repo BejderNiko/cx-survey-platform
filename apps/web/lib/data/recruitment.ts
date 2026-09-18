@@ -15,6 +15,17 @@ const NATIVE_RECRUITMENT_QUESTIONS: Record<string, { label: string; fieldType: s
   tag: { label: "Tags", fieldType: "select", options: [] },
 };
 
+async function hasRecruitmentSourceKey(): Promise<boolean> {
+  const [row] = await adminSql`
+    select exists (
+      select 1 from information_schema.columns
+      where table_schema = 'public'
+        and table_name = 'recruitment_page_questions'
+        and column_name = 'source_key'
+    ) as available`;
+  return Boolean(row?.available);
+}
+
 export interface RecruitmentQuestion {
   id: string;
   key: string;
@@ -56,9 +67,14 @@ export async function getRecruitmentPage(token: string): Promise<PublicRecruitme
            screening_continue_label, screening_end_label, screening_end_content
     from recruitment_pages where public_token = ${token} and is_active`;
   if (!page) return null;
-  const questions = await adminSql`
+  const sourceKeyAvailable = await hasRecruitmentSourceKey();
+  const questions = sourceKeyAvailable ? await adminSql`
     select rpq.id as question_id, rpq.source_key, cf.id, cf.key, cf.label, cf.field_type, cf.options, rpq.required, rpq.position
     from recruitment_page_questions rpq left join custom_fields cf on cf.id = rpq.custom_field_id
+    where rpq.recruitment_page_id = ${page.id}
+    order by rpq.position` : await adminSql`
+    select rpq.id as question_id, null::text as source_key, cf.id, cf.key, cf.label, cf.field_type, cf.options, rpq.required, rpq.position
+    from recruitment_page_questions rpq join custom_fields cf on cf.id = rpq.custom_field_id
     where rpq.recruitment_page_id = ${page.id}
     order by rpq.position`;
   const tagRows = await adminSql`select name from tags where org_id = ${page.org_id} order by name`;
@@ -159,9 +175,19 @@ export async function submitRecruitment(
       for update`;
     if (!page) return { ok: false, error: "unknown_token" };
 
-    const questions = await tx`
+    const [{ available: sourceKeyAvailable }] = await tx`
+      select exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'recruitment_page_questions'
+          and column_name = 'source_key'
+      ) as available`;
+    const questions = sourceKeyAvailable ? await tx`
       select rpq.id as question_id, rpq.source_key, cf.id, cf.key, cf.label, cf.field_type, cf.options, rpq.required, rpq.position
       from recruitment_page_questions rpq left join custom_fields cf on cf.id = rpq.custom_field_id
+      where rpq.recruitment_page_id = ${page.id}` : await tx`
+      select rpq.id as question_id, null::text as source_key, cf.id, cf.key, cf.label, cf.field_type, cf.options, rpq.required, rpq.position
+      from recruitment_page_questions rpq join custom_fields cf on cf.id = rpq.custom_field_id
       where rpq.recruitment_page_id = ${page.id}`;
 
     const normalized: { fieldId: string | null; sourceKey: string | null; value: unknown }[] = [];
