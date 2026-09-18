@@ -40,7 +40,7 @@ Confidence: 0.0-1.0
 | Authentication | bcrypt/local login, timing/user enumeration, cookie signing/claims/expiry, secure flags, CSRF, revocation/deactivation, password handling, login error handling |
 | Entra/Supabase Auth cutover | Identity linking, callback/session refresh, group/role mapping, multi-org selection, deprovisioning, invite flow, MFA/conditional access boundary, migration of dev users |
 | Hosted database roles | Restricted app role design, admin/service role, pooler compatibility, RLS subject claims, password rotation, connection scope, role ownership and grants |
-| Secrets | `.env.example`, server/client bundling, Turbo env filtering/cache, CI values, Preview/Production separation, fallbacks, rotation, logs/errors, Firecrawl key split, analytics bearer |
+| Secrets | `.env.example`, server/client bundling, Turbo env filtering/cache, CI values, Preview/Production separation, fallbacks, rotation, logs/errors, analytics bearer |
 | Public APIs | Rate limiting, distributed enforcement, payload/body caps, token entropy/leak/replay, enumeration, CORS, cache headers, abuse and denial of service |
 
 ## Data, privacy, and migration

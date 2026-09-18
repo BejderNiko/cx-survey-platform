@@ -30,7 +30,7 @@ Operate source-read-only.
 - Do not install or upgrade dependencies.
 - Do not read, request, print, copy, or modify credentials or secret values.
 - Do not open `.env`, `.env.local`, `.vercel`, credential stores, shell history, or provider dashboards.
-- Do not call GitHub, Vercel, Supabase, Azure, Microsoft Entra, Firecrawl, email, or other remote APIs.
+- Do not call GitHub, Vercel, Supabase, Azure, Microsoft Entra, email, or other remote APIs.
 - Do not run migrations, seeds, database reset/init scripts, SQL, or commands that modify local or remote databases.
 - Do not deploy, provision, connect, or configure infrastructure.
 - Do not run Fable-authored scripts or code changes.

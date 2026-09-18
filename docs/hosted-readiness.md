@@ -25,8 +25,6 @@ Code cannot guarantee 100% uptime. Availability depends on Vercel, Supabase, ana
 | `APP_BASE_URL` | web server → public links | public config | Exact HTTPS origin in Preview/Production. |
 | `ANALYTICS_URL` | web server → FastAPI | server config | HTTPS origin in Preview/Production. No localhost fallback. |
 | `ANALYTICS_API_SECRET` | web server → FastAPI | shared server secret | Same value on matching web/analytics environment; at least 32 random bytes; different between staging and production. |
-| `IMPORT_API_SECRET` | approved caller → import route | server secret | Authenticates caller to OK route. Not Firecrawl credential. |
-| `FIRECRAWL_API_KEY` | import route → Firecrawl | provider secret | Authenticates OK route to Firecrawl. Not route secret. |
 | `NEXT_PUBLIC_SUPABASE_URL` | browser → Supabase | public config | Used when Supabase Auth cutover is active. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | browser → Supabase | public key | Safe only with correct RLS. Never service role. |
 | `SUPABASE_SERVICE_ROLE_KEY` | narrow server path → Supabase API | highly privileged server secret | Bypasses RLS. Never browser-visible and never substituted for a PostgreSQL URL. |
