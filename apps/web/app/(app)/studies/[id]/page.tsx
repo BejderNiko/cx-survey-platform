@@ -22,7 +22,7 @@ export default async function StudyPage({ params }: { params: Promise<{ id: stri
       tx`select c.id, c.parent_id,
              case when c.question_code like '__section__:%' then null else c.question_code end as question_code,
              case when to_jsonb(c)->>'section_id' is not null then to_jsonb(c)->>'section_id'
-                  when c.question_code like '__section__:%' then substring(c.question_code from 12)
+                  when c.question_code like '__section__:%' then substring(c.question_code from 13)
                   else null end as section_id, c.body, c.status,
                 c.author_id, c.created_at::text, c.resolved_at::text, coalesce(u.full_name, 'Former user') as author,
                 resolver.full_name as resolved_by_name

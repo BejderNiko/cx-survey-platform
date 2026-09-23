@@ -32,9 +32,6 @@ export default async function RecruitmentPage({
       <div className="mb-1 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="font-display text-2xl tracking-tight text-heading">Rekruttering</h1>
-          <p className="mt-1 text-sm text-muted">
-            Selvbetjeningssider, der omdanner besøgende til panelister — med screening og egne spørgsmål.
-          </p>
         </div>
         {canManage && !showCreate && (
           <LinkButton href="/panel/recruitment?ny=1" variant="primary">+ Opret side</LinkButton>
@@ -42,7 +39,7 @@ export default async function RecruitmentPage({
       </div>
 
       {schemaError ? (
-        <Card title="Rekruttering ikke klar">
+        <Card title="Databaseopdatering påkrævet">
           <p role="alert" className="text-sm text-danger">{schemaError}</p>
           <p className="mt-2 text-xs text-muted">Siden har ikke ændret data. Kontrollér environment readiness før ny prøve.</p>
         </Card>

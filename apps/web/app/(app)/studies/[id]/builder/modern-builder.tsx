@@ -780,7 +780,7 @@ function CommentPopover({
   return (
     <details ref={detailsRef} className="relative">
       <summary className="flex h-9 cursor-pointer list-none items-center rounded-md bg-slate-100 px-2 text-xs font-medium text-slate-700 hover:bg-slate-200" aria-label={label}>
-        Comment{count > 0 ? " · " + count : ""}
+        Comment on{count > 0 ? " · " + count : ""}
       </summary>
       <div className="absolute right-0 top-10 z-50 w-[min(440px,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
         <CommentsPanel

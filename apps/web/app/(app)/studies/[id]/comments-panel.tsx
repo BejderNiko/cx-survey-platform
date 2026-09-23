@@ -87,18 +87,13 @@ export function CommentsPanel({
       router.refresh();
     });
   }
-  const scopeLabel = questionCode !== undefined
-    ? "question " + questionCode
-    : sectionId !== undefined
-      ? "section"
-      : "study";
 
   return (
     <div className="space-y-3">
       <div className="flex gap-2">
         <Textarea
           rows={2}
-          placeholder={"Comment on " + scopeLabel + "…"}
+          placeholder="Comment on"
           value={body}
           onChange={(event) => setBody(event.target.value)}
           aria-label="New comment"

@@ -4,7 +4,7 @@ import { recruitmentSchemaMessage } from "@/app/(app)/panel/recruitment/schema-s
 describe("recruitment schema status", () => {
   it("maps missing schema to safe Danish guidance", () => {
     expect(recruitmentSchemaMessage({ code: "42703", message: "column source_key does not exist" }))
-      .toBe("Rekruttering er ikke klar i dette miljø endnu. Kontakt en administrator for schema-status.");
+      .toBe("Rekrutteringssider kræver en opdateret database. Kontakt en administrator.");
   });
 
   it("does not expose an unexpected database error", () => {

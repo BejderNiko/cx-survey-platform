@@ -34,12 +34,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen">
-      <nav aria-label="Primær" className="sticky top-0 hidden h-screen w-60 shrink-0 self-start flex-col overflow-y-auto border-r border-line bg-surface md:flex">
+      <nav aria-label="Primær" className="sticky top-0 hidden h-screen w-[216px] shrink-0 self-start flex-col overflow-y-auto border-r border-line bg-surface/90 md:flex">
         <div className="px-5 pb-4 pt-5">
           <div className="font-display text-xl tracking-tight text-heading">
-            <span className="rounded-md bg-accent px-2 py-0.5 text-sm font-bold tracking-tight text-white">OK</span><span className="font-display text-xl tracking-tight text-heading">CX</span>
+            <span className="font-display text-[2rem] font-semibold tracking-[-0.06em] text-accent">OKCX</span>
           </div>
-          <div className="mt-0.5 text-[11px] uppercase tracking-widest text-muted">Kundeindsigt</div>
+          <div className="mt-1 text-[10px] uppercase tracking-[0.22em] text-muted">Kundeindsigt</div>
         </div>
         <ul className="flex-1 space-y-0.5 px-3">
           {items.map((item) => (

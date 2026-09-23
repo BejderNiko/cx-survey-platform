@@ -107,7 +107,7 @@ export async function createRecruitmentPage(internalName: string, workspaceId: s
     return row.id as string;
   });
   revalidatePath("/panel/recruitment");
-  redirect(`/panel/recruitment/${id}`);
+  return id;
 }
 
 export interface RecruitmentPageDetail {
