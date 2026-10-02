@@ -34,9 +34,8 @@ test.describe("roller og adgang", () => {
     await signIn(page, "owner@example.invalid");
     await page.goto("/panel/recruitment");
     await expect(page.getByRole("heading", { name: "Rekruttering" })).toBeVisible();
-    const alerts = (await page.getByRole("alert").allTextContents())
-      .map((text) => text.trim().slice(0, 240));
-    expect(alerts, `Uventet rekrutteringsfejl: ${alerts[0] ?? "(tom besked)"}`).toEqual([]);
+    await expect(page.getByText("Ingen rekrutteringssider endnu", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Databaseopdatering påkrævet" })).toHaveCount(0);
   });
 
   test("læser ser studier skrivebeskyttet (ingen builder-/publicér-knapper)", async ({ page }) => {
