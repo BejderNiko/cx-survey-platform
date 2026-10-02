@@ -42,7 +42,20 @@ export default async function StudiesPage({
           />
         </Card>
       )}
-      <StudyOverview studyLinks={data.studies.map((study) => ({ id: String(study.id) }))} canCreate={canCreate} />
+      <StudyOverview
+        studies={data.studies.map((study) => ({
+          id: String(study.id),
+          title: String(study.title),
+          workspace: String(study.workspace),
+          status: String(study.status),
+          studyType: String(study.study_type),
+          versions: Number(study.versions),
+          distributions: Number(study.distributions),
+          completed: Number(study.completed),
+          updatedAt: String(study.updated_at),
+        }))}
+        canCreate={canCreate}
+      />
     </div>
   );
 }

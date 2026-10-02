@@ -34,7 +34,9 @@ test.describe("roller og adgang", () => {
     await signIn(page, "owner@example.invalid");
     await page.goto("/panel/recruitment");
     await expect(page.getByRole("heading", { name: "Rekruttering" })).toBeVisible();
-    await expect(page.getByRole("alert")).toHaveCount(0);
+    const alerts = (await page.getByRole("alert").allTextContents())
+      .map((text) => text.trim().slice(0, 240));
+    expect(alerts, `Uventet rekrutteringsfejl: ${alerts[0] ?? "(tom besked)"}`).toEqual([]);
   });
 
   test("læser ser studier skrivebeskyttet (ingen builder-/publicér-knapper)", async ({ page }) => {
@@ -113,8 +115,11 @@ test.describe("besvarelse og resultater", () => {
       .first()
       .getAttribute("href");
     await page.goto(`${studyHref}/results`);
-    const firstRow = page.locator("tbody tr").first();
-    await expect(firstRow).toContainText("v1");
+    const responseSection = page.locator("section").filter({
+      has: page.getByRole("heading", { name: /^Individuelle besvarelser \(/ }),
+    });
+    const firstResponseRow = responseSection.getByRole("row").nth(1);
+    await expect(firstResponseRow.getByRole("cell").nth(1)).toHaveText("v1");
   });
 });
 
@@ -155,6 +160,6 @@ test.describe("analyse", () => {
     await page.getByRole("link", { name: /Relationel NPS 2026 H2 — besvarelser/ }).first().click();
     await page.waitForSelector("text=Arbejdsområde — v1");
     await expect(page.getByRole("button", { name: "Kør analyse" })).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "R workspace" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^Arbejdsområde — v1 \(\d+ rækker\)$/ })).toBeVisible();
   });
 });

@@ -120,6 +120,9 @@ with required_tables(table_name) as (
     ('panelist_attributes', 'value'),
     ('feature_requests', 'org_id'),
     ('feature_requests', 'created_by'),
+    ('feature_requests', 'source_path'),
+    ('feature_requests', 'target_snapshot'),
+    ('feature_requests', 'section'),
     ('feature_request_events', 'org_id'),
     ('feature_request_events', 'actor_user_id')
 )
@@ -147,7 +150,19 @@ left join information_schema.columns c
 group by t.table_name
 order by t.table_name;
 
--- E. Exact additive objects required by readiness and migration 16.
+-- D2. Verify column types and nullability changed by migrations 14–16.
+-- Compare actual values with each local migration before accepting Preview.
+select table_name, column_name, data_type, is_nullable, column_default
+from information_schema.columns
+where table_schema = 'public'
+  and (
+    (table_name = 'feature_requests' and column_name in ('source_path', 'target_snapshot', 'section'))
+    or (table_name = 'comments' and column_name = 'section_id')
+    or (table_name = 'recruitment_page_questions' and column_name in ('custom_field_id', 'source_key'))
+  )
+order by table_name, column_name;
+
+-- E. Exact additive objects required by readiness and migrations 15–16.
 select
   exists (
     select 1 from pg_constraint
@@ -160,6 +175,24 @@ select
       and tablename = 'recruitment_page_questions'
       and indexname = 'recruitment_page_questions_source_uidx'
   ) as recruitment_source_unique_index_exists,
+  (
+    select indexdef from pg_indexes
+    where schemaname = 'public'
+      and tablename = 'recruitment_page_questions'
+      and indexname = 'recruitment_page_questions_source_uidx'
+  ) as recruitment_source_unique_index_definition,
+  exists (
+    select 1 from pg_indexes
+    where schemaname = 'public'
+      and tablename = 'comments'
+      and indexname = 'comments_study_section_idx'
+  ) as comments_section_index_exists,
+  (
+    select indexdef from pg_indexes
+    where schemaname = 'public'
+      and tablename = 'comments'
+      and indexname = 'comments_study_section_idx'
+  ) as comments_section_index_definition,
   exists (
     select 1 from pg_constraint
     where conrelid = to_regclass('public.comments')
@@ -251,6 +284,12 @@ order by tablename, policyname;
 --    version timestamps; this does not verify file contents/checksums.
 -- 3. Batch D must show no missing tables and empty missing_required_columns.
 --    Batch E booleans must all be true.
+--    The two returned index definitions must match their migration column
+--    order and predicate: recruitment (recruitment_page_id, source_key) WHERE
+--    source_key IS NOT NULL; comments (org_id, study_id, section_id, created_at).
+--    Batch D2 must show source_path/section/section_id/source_key as nullable
+--    text; target_snapshot as NOT NULL jsonb with '{}' default; and
+--    custom_field_id as nullable uuid. Compare defaults/types, not just names.
 -- 4. Batch F must show MATCH for every table. Expected forced=false for the
 --    three identity tables only; all others must have RLS enabled and forced.
 -- 5. Batch G must return exactly two policies with predicates matching migration
