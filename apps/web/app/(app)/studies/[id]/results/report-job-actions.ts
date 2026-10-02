@@ -9,7 +9,7 @@ import { buildPrototypePaths, type PrototypeInteractionRow } from "@/lib/prototy
 import { loadLatestResultData } from "@/lib/results-data";
 import { filterResponses, parseResultFiltersDetailed, RESULT_RESPONSE_LIMIT, type FilterableResponse } from "@/lib/results-filters";
 
-const TEMPLATE_REFERENCE = String.raw`\\ok.dk\data\CX_og_Market_Insights\Brugerundersøgelser\Skabelon til afrapporteringer CX & Market Insights.pdf`;
+const TEMPLATE_REFERENCE = "#154 app-undersøgelse.pptx — OK CX & Market Insights reference";
 
 export async function renamePrototypePath(input: { studyId: string; studyVersionId: string; questionCode: string; signature: string; label: string }): Promise<{ ok: true } | { ok: false; error: string }> {
   const label = input.label.trim();

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { allQuestions, assertCan, can, computeNps, instrumentDefinition, lt, type Question } from "@ok/domain";
+import { allQuestions, assertCan, can, computeNps, instrumentDefinition, lt, type Condition, type Question } from "@ok/domain";
+import type { ReactNode } from "react";
 import { Card, KpiTile, Table, Td, Th } from "@/components/ui";
 import { requireSession } from "@/lib/auth";
 import { withUser } from "@/lib/db";
@@ -26,8 +27,12 @@ import {
   type ResultFilter,
 } from "@/lib/results-filters";
 import { ReportJobs } from "./report-jobs";
+import { OpenAnswerSearch } from "./open-answer-search";
+import { ResultCommentPopover } from "./result-comment-popover";
+import type { StudyCommentRow } from "../comments-panel";
 
 type Search = { filters?: string; ask?: string; filterError?: string };
+type FirstClickInteraction = { response_id?: unknown; payload: unknown };
 
 export async function ResultsDashboard({ studyId, search }: { studyId: string; search: Search }) {
   const session = await requireSession();
@@ -40,6 +45,20 @@ export async function ResultsDashboard({ studyId, search }: { studyId: string; s
     throw error;
   }) : [];
   const pathLabels = new Map(pathLabelRows.map((row) => [`${row.question_code}\u0000${row.path_signature}`, String(row.label)]));
+  const resultComments = await withUser(session.userId, session.orgId, (tx) => tx`select c.id, c.parent_id,
+             case when c.question_code like '__section__:%' then null else c.question_code end as question_code,
+             case when to_jsonb(c)->>'section_id' is not null then to_jsonb(c)->>'section_id'
+                  when c.question_code like '__section__:%' then substring(c.question_code from 13)
+                  else null end as section_id, c.body, c.status,
+             c.author_id, c.created_at::text, c.resolved_at::text, coalesce(u.full_name, 'Former user') as author,
+             resolver.full_name as resolved_by_name
+      from comments c
+      left join users u on u.id = c.author_id
+      left join users resolver on resolver.id = c.resolved_by
+      where c.study_id = ${studyId} and c.org_id = ${session.orgId}
+      order by c.created_at asc limit 500`);
+  const resultCommentRows = resultComments as unknown as StudyCommentRow[];
+  const canResolveComments = can(session.role, "comments.resolve");
   const parsed = instrumentDefinition.safeParse(data.version?.definition ?? data.study.draft_definition);
   if (!parsed.success) return <Card title="Studiedata kunne ikke læses"><p role="alert">Instrumentet er ugyldigt.</p></Card>;
   const definition = parsed.data;
@@ -90,6 +109,20 @@ export async function ResultsDashboard({ studyId, search }: { studyId: string; s
   const draftFilters = draft?.filters ?? [];
   const combinedDraft = mergeResultFilters(filters, draftFilters);
   const dynamicTagCounts = tagFacetCounts(responseRows, filters);
+  const firstClickByQuestion = new Map<string, FirstClickInteraction[]>();
+  for (const interaction of data.interactions) {
+    if (String(interaction.event_type) !== "first_click" || !filteredIds.has(String(interaction.response_id))) continue;
+    const click: FirstClickInteraction = { response_id: interaction.response_id, payload: interaction.payload };
+    const key = String(interaction.question_code);
+    firstClickByQuestion.set(key, [...(firstClickByQuestion.get(key) ?? []), click]);
+  }
+  const openAnswerItems = data.answers.flatMap((answer) => {
+    const question = allQuestions(definition).find((item) => item.code === String(answer.question_code));
+    const responseId = String(answer.response_id);
+    if (!question || !["short_text", "long_text"].includes(question.type) || !filteredIds.has(responseId)) return [];
+    const text = typeof answer.value === "string" || typeof answer.value === "number" ? String(answer.value) : "";
+    return text.trim() ? [{ responseId, questionCode: question.code, questionLabel: lt(question.label, definition.defaultLanguage) || question.code, text }] : [];
+  });
 
   return (
     <div className="space-y-4">
@@ -139,10 +172,12 @@ export async function ResultsDashboard({ studyId, search }: { studyId: string; s
       </Card>
 
       {allQuestions(definition).map((question) => question.type === "prototype_test" ? (
-        <PrototypeResult key={question.code} studyId={studyId} studyVersionId={data.version ? String(data.version.id) : ""} question={question} values={questionValues(question.code)} paths={(pathsByQuestion.get(question.code) ?? []).filter((path) => filteredIds.has(path.responseId))} filters={filters} canRenamePaths={can(session.role, "reports.create")} pathLabels={Object.fromEntries([...pathLabels].filter(([key]) => key.startsWith(`${question.code}\u0000`)).map(([key, value]) => [key.slice(question.code.length + 1), value]))} />
+        <PrototypeResult key={question.code} studyId={studyId} studyVersionId={data.version ? String(data.version.id) : ""} question={question} logicText={logicTextForQuestion(question, definition)} values={questionValues(question.code)} paths={(pathsByQuestion.get(question.code) ?? []).filter((path) => filteredIds.has(path.responseId))} filters={filters} canRenamePaths={can(session.role, "reports.create")} pathLabels={Object.fromEntries([...pathLabels].filter(([key]) => key.startsWith(`${question.code}\u0000`)).map(([key, value]) => [key.slice(question.code.length + 1), value]))} comments={resultCommentRows} canResolveComments={canResolveComments} currentUserId={session.userId} />
       ) : (
-        <QuestionResult key={question.code} question={question} values={questionValues(question.code)} filters={filters} hrefFor={hrefFor} />
+        <QuestionResult key={question.code} studyId={studyId} question={question} logicText={logicTextForQuestion(question, definition)} values={questionValues(question.code)} filters={filters} hrefFor={hrefFor} firstClickInteractions={firstClickByQuestion.get(question.code) ?? []} comments={resultCommentRows} canResolveComments={canResolveComments} currentUserId={session.userId} />
       ))}
+
+      <OpenAnswerSearch items={openAnswerItems} />
 
       <ReportJobs studyId={studyId} filters={filters} />
 
@@ -164,8 +199,36 @@ export async function ResultsDashboard({ studyId, search }: { studyId: string; s
   );
 }
 
-function QuestionResult({ question, values, filters, hrefFor }: { question: Question; values: unknown[]; filters: ResultFilter[]; hrefFor: (filters: ResultFilter[]) => string }) {
-  const title = <span>{lt(question.label, "da") || question.code} {question.visibleIf?.length ? <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">LOGIC</span> : null} <span className="text-xs font-normal text-muted">n = {values.length}</span></span>;
+function logicTextForQuestion(question: Question, definition: ReturnType<typeof instrumentDefinition.parse>): string | null {
+  const block = definition.blocks.find((candidate) => candidate.questions.some((item) => item.code === question.code));
+  const conditions = [...(block?.visibleIf ?? []), ...(question.visibleIf ?? [])];
+  if (conditions.length === 0) return null;
+  const mode = block?.visibleIfMode ?? question.visibleIfMode ?? "all";
+  return "Logic: " + conditions.map((condition) => formatLogicCondition(condition, definition)).join(mode === "any" ? " OR " : " AND ");
+}
+
+function formatLogicCondition(condition: Condition, definition: ReturnType<typeof instrumentDefinition.parse>): string {
+  const target = allQuestions(definition).find((item) => item.code === condition.questionCode);
+  const targetLabel = target ? lt(target.label, definition.defaultLanguage) || target.code : condition.questionCode;
+  const effects = condition.effect === "hide" ? "Hide when" : "Show when";
+  const operators: Record<Condition["op"], string> = {
+    eq: "equals", ne: "does not equal", lt: "is less than", lte: "is at most", gt: "is greater than", gte: "is at least",
+    in: "is one of", not_in: "is not one of", contains: "contains", answered: "is answered", not_answered: "is not answered",
+  };
+  if (condition.op === "answered" || condition.op === "not_answered") return effects + " " + targetLabel + " " + operators[condition.op];
+  return effects + " " + targetLabel + " " + operators[condition.op] + " " + formatLogicValue(condition.value);
+}
+
+function formatLogicValue(value: unknown): string {
+  if (Array.isArray(value)) return value.map((item) => formatLogicValue(item)).join(", ");
+  if (typeof value === "string") return "\"" + value + "\"";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (value === null || value === undefined) return "empty";
+  return String(value);
+}
+
+function QuestionResult({ studyId, question, logicText, values, filters, hrefFor, firstClickInteractions, comments, canResolveComments, currentUserId }: { studyId: string; question: Question; logicText: string | null; values: unknown[]; filters: ResultFilter[]; hrefFor: (filters: ResultFilter[]) => string; firstClickInteractions: { payload: unknown }[]; comments: StudyCommentRow[]; canResolveComments: boolean; currentUserId: string }) {
+  const title = <span>{lt(question.label, "da") || question.code} {logicText && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">{logicText}</span>} <span className="text-xs font-normal text-muted">n = {values.length}</span><ResultCommentPopover studyId={studyId} questionCode={question.code} comments={comments} canResolve={canResolveComments} currentUserId={currentUserId} /></span>;
   if (question.type === "nps") {
     const result = computeNps(values);
     return <Card title={title}><div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-4"><KpiTile label="NPS" value={result.score === null ? "—" : fmtNumber(result.score)} hint={`(${result.promoters} − ${result.detractors}) / ${result.valid}`} /><KpiTile label="Ambassadører" value={String(result.promoters)} /><KpiTile label="Passive" value={String(result.passives)} /><KpiTile label="Kritikere" value={String(result.detractors)} /></div><Bars question={question} options={Array.from({ length: 11 }, (_, value) => ({ value: String(value), label: String(value) }))} values={values} filters={filters} hrefFor={hrefFor} /></Card>;
@@ -175,10 +238,19 @@ function QuestionResult({ question, values, filters, hrefFor }: { question: Ques
     return <Card title={title}><Bars question={question} options={options} values={values} filters={filters} hrefFor={hrefFor} /></Card>;
   }
   if (question.type === "consent") return <Card title={title}><Bars question={question} options={[{ value: "true", label: "Ja" }, { value: "false", label: "Nej" }]} values={values} filters={filters} hrefFor={hrefFor} /></Card>;
+  if (question.type === "first_click") return <FirstClickHeatmap title={title} interactions={firstClickInteractions} />;
   const numeric = values.map(Number).filter(Number.isFinite);
   return <Card title={title}><p className="text-sm text-muted">Svar: {values.length}{numeric.length ? ` · gennemsnit ${fmtNumber(numeric.reduce((sum, value) => sum + value, 0) / numeric.length, 2)} (${numeric.reduce((sum, value) => sum + value, 0)} ÷ ${numeric.length})` : ""}</p></Card>;
 }
 
+function FirstClickHeatmap({ title, interactions }: { title: ReactNode; interactions: FirstClickInteraction[] }) {
+  const clicks = interactions.map((item) => item.payload as Record<string, unknown>).map((payload) => {
+    const width = Number(payload.naturalWidth) || 1;
+    const height = Number(payload.naturalHeight) || 1;
+    return { x: Math.max(0, Math.min(100, Number(payload.x) / width * 100)), y: Math.max(0, Math.min(100, Number(payload.y) / height * 100)) };
+  }).filter((click) => Number.isFinite(click.x) && Number.isFinite(click.y));
+  return <Card title={title}><div className="relative aspect-video overflow-hidden rounded-lg border border-line bg-[#f7efeb]" aria-label="Heatmap over første klik"><div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(70,0,25,.06),transparent_65%)]" />{clicks.map((click, index) => <span key={index} className="absolute h-10 w-10 -translate-x-1/2 -translate-y-1/2 rounded-full bg-red-500/40 blur-md" style={{ left: `${click.x}%`, top: `${click.y}%` }} />)}</div><p className="mt-2 text-xs text-muted">{clicks.length} klik · x = billedbredde · y = billedhøjde. Nævner: filtrerede første-klik-events.</p></Card>;
+}
 function Bars({ question, options, values, filters, hrefFor }: { question: Question; options: { value: string; label: string }[]; values: unknown[]; filters: ResultFilter[]; hrefFor: (filters: ResultFilter[]) => string }) {
   const counts = new Map<string, number>();
   for (const raw of values) for (const value of Array.isArray(raw) ? raw : [raw]) counts.set(String(value), (counts.get(String(value)) ?? 0) + 1);
@@ -191,7 +263,7 @@ function Bars({ question, options, values, filters, hrefFor }: { question: Quest
   })}</div>;
 }
 
-function PrototypeResult({ studyId, studyVersionId, question, values, paths, filters, canRenamePaths, pathLabels }: { studyId: string; studyVersionId: string; question: Question; values: unknown[]; paths: ReturnType<typeof buildPrototypePaths>; filters: ResultFilter[]; canRenamePaths: boolean; pathLabels: Record<string, string> }) {
+function PrototypeResult({ studyId, studyVersionId, question, logicText, values, paths, filters, canRenamePaths, pathLabels, comments, canResolveComments, currentUserId }: { studyId: string; studyVersionId: string; question: Question; logicText: string | null; values: unknown[]; paths: ReturnType<typeof buildPrototypePaths>; filters: ResultFilter[]; canRenamePaths: boolean; pathLabels: Record<string, string>; comments: StudyCommentRow[]; canResolveComments: boolean; currentUserId: string }) {
   const groups = groupCommonPaths(paths);
   const goalFrameId = question.prototype?.goalFrameId;
   const successes = goalFrameId ? paths.filter((path) => path.frames.includes(goalFrameId)).length : 0;
@@ -199,7 +271,7 @@ function PrototypeResult({ studyId, studyVersionId, question, values, paths, fil
   const misclicks = clicks.filter((click) => click.isMisclick).length;
   const averageElapsedMs = paths.length ? paths.reduce((sum, path) => sum + path.elapsedMs, 0) / paths.length : 0;
   const screenshots = (question.prototype?.frameScreenshots ?? []).flatMap((entry) => entry.screenshot ? [{ frameId: entry.frameId, frameName: entry.frameName, assetId: entry.screenshot.assetId, coordinateScale: entry.coordinateScale }] : []);
-  return <Card title={`${lt(question.label, "da") || question.code} · Prototype paths`}>
+  return <Card title={<span>{lt(question.label, "da") || question.code} {logicText && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">{logicText}</span>} <span className="text-xs font-normal text-muted">n = {values.length}</span><ResultCommentPopover studyId={studyId} questionCode={question.code} comments={comments} canResolve={canResolveComments} currentUserId={currentUserId} /></span>}>
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-5"><KpiTile label={question.prototype?.flowType === "free" ? "Flow" : "Mål nået"} value={question.prototype?.flowType === "free" ? "Free" : `${values.length ? fmtNumber(successes / values.length * 100, 1) : 0} %`} hint={question.prototype?.flowType === "free" ? "Intet goal-krav" : `${successes} ÷ ${values.length}`} /><KpiTile label="Deltagere" value={String(values.length)} /><KpiTile label="Gennemsnitstid" value={`${fmtNumber(averageElapsedMs / 1000, 1)} s`} hint={`${fmtNumber(paths.reduce((sum, path) => sum + path.elapsedMs, 0) / 1000, 1)} s ÷ ${paths.length}`} /><KpiTile label="Klik" value={String(clicks.length)} hint={`${misclicks} fejlklik · ${clicks.length ? fmtNumber(misclicks / clicks.length * 100, 1) : 0} %`} /><KpiTile label="Fælles paths" value={String(groups.length)} /></div>
     <PrototypeResultView studyId={studyId} studyVersionId={studyVersionId} questionCode={question.code} flowType={question.prototype?.flowType ?? "task"} goalFrameId={goalFrameId} paths={paths} filters={filters} screenshots={screenshots} canRenamePaths={canRenamePaths} pathLabels={pathLabels} />
     <p className="mt-3 text-xs text-muted">Path-succes beregnes som ‘goal frame set mindst én gang’. Screenshot-overlay bruger kun godkendte private-storage assets. Koordinatskala skal matche Figma-frame og screenshot-export; live alignment er ikke verificeret uden rigtig prototype.</p>

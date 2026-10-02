@@ -148,8 +148,6 @@ Do not run SQL or migration commands.
 - `apps/web/app/(app)/panel/import/actions.ts`
 - `apps/web/app/api/import-batches/[id]/errors/route.ts`
 - `apps/web/app/api/dataset-versions/[id]/export/route.ts`
-- `apps/web/app/api/import/firecrawl/route.ts`
-- `apps/web/app/api/import/firecrawl/crawl/route.ts`
 - `apps/web/app/(app)/panel/actions.ts`
 - `apps/web/app/(app)/distributions/actions.ts`
 - `apps/web/lib/templates.ts`
@@ -159,7 +157,6 @@ Do not run SQL or migration commands.
 
 Trace file size, row count, file type, parser limits, decompression/memory exposure, formula-injection protection, filename/content-disposition behavior, dry-run/commit identity, duplicate rules, PII persistence, anonymization propagation, prior dataset versions, outbox/audit details, and export authorization.
 
-Firecrawl routes are separate research tooling. Verify auth, key separation, input/URL restrictions, response exposure, provider error handling, and whether they belong in production app surface.
 
 ## 8. Analytics contract and validity
 

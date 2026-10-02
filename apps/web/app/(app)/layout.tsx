@@ -1,11 +1,12 @@
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { can, type Action } from "@ok/domain";
-import { IconChart, IconCog, IconHome, IconPanel, IconStudy } from "@/components/icons";
+import { IconChart, IconCog, IconPanel, IconStudy } from "@/components/icons";
 import { destroySession, requireSession } from "@/lib/auth";
 import { t, type UiKey } from "@/lib/i18n";
 import { ROLE_LABEL, label } from "@/lib/labels";
 import { NavLink } from "./nav-link";
+import { FeedbackWidget } from "@/components/feedback-widget";
 
 async function signOut() {
   "use server";
@@ -14,7 +15,6 @@ async function signOut() {
 }
 
 const NAV: { href: string; key: UiKey; icon: ReactNode; requires?: Action }[] = [
-  { href: "/home", key: "nav_home", icon: <IconHome /> },
   { href: "/studies", key: "nav_studies", icon: <IconStudy />, requires: "studies.view" },
   { href: "/panel", key: "nav_panel", icon: <IconPanel />, requires: "panel.view" },
   { href: "/analytics", key: "nav_analytics", icon: <IconChart />, requires: "analytics.view" },
@@ -34,12 +34,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen">
-      <nav aria-label="Primær" className="sticky top-0 hidden h-screen w-60 shrink-0 self-start flex-col overflow-y-auto border-r border-line bg-surface md:flex">
+      <nav aria-label="Primær" className="sticky top-0 hidden h-screen w-[216px] shrink-0 self-start flex-col overflow-y-auto border-r border-line bg-surface/90 md:flex">
         <div className="px-5 pb-4 pt-5">
           <div className="font-display text-xl tracking-tight text-heading">
-            OK<span className="text-accent"> · CX</span>
+            <span className="font-display text-[2rem] font-semibold tracking-[-0.06em] text-accent">OKCX</span>
           </div>
-          <div className="mt-0.5 text-[11px] uppercase tracking-widest text-muted">Kundeindsigt</div>
+          <div className="mt-1 text-[10px] uppercase tracking-[0.22em] text-muted">Kundeindsigt</div>
         </div>
         <ul className="flex-1 space-y-0.5 px-3">
           {items.map((item) => (
@@ -74,7 +74,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       </nav>
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="app-topbar flex items-center justify-between gap-2 border-b border-line bg-surface px-4 py-2 md:hidden">
-          <span className="font-display text-base text-heading">OK · CX</span>
+          <span className="flex items-center gap-2"><span className="rounded bg-accent px-1.5 py-0.5 text-xs font-bold text-white">OK</span><span className="font-display text-base text-heading">CX</span></span>
           <form action={signOut}>
             <button type="submit" className="text-xs text-muted underline">
               {t("sign_out")}
@@ -92,6 +92,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         <main className="min-w-0 flex-1 p-4 md:p-8">
           <div className="page-in mx-auto max-w-6xl">{children}</div>
         </main>
+        {can(session.role, "feature_requests.create") && <FeedbackWidget />}
       </div>
     </div>
   );

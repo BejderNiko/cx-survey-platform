@@ -5,6 +5,9 @@ export async function getAnalyticsOverview(tx: Tx, orgId: string) {
   const datasets = await tx`
     select d.id, d.name, d.description, d.source_kind, d.created_at, u.full_name as owner,
            s.title as study_title,
+           (select v.id from dataset_versions v
+            where v.dataset_id = d.id and v.org_id = ${orgId}
+            order by v.version_number desc limit 1) as latest_version_id,
            (select max(version_number) from dataset_versions v
             where v.dataset_id = d.id and v.org_id = ${orgId}) as latest_version,
            (select row_count from dataset_versions v

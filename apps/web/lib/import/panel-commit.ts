@@ -3,6 +3,8 @@ import type { Tx } from "../db";
 import {
   validateRows,
   type DedupRule,
+  type ConsentPurpose,
+  type ConsentEvidence,
   type ImportMapping,
   type NormalizedRow,
 } from "./validate";
@@ -18,6 +20,12 @@ export interface PanelImportCounts {
   skippedDuplicates: number;
   before: number;
   after?: number;
+  surveyContactGranted?: number;
+  surveyContactWithdrawn?: number;
+  surveyContactNoEvidence?: number;
+  panelMembershipGranted?: number;
+  panelMembershipWithdrawn?: number;
+  panelMembershipNoEvidence?: number;
 }
 
 export interface PanelImportPlan {
@@ -46,6 +54,7 @@ type PanelistFields = {
 type PanelistWrite = PanelistFields & {
   id: string;
   attributes: Record<string, string>;
+  consents?: Partial<Record<ConsentPurpose, ConsentEvidence>>;
   tags?: string[];
 };
 
@@ -220,6 +229,25 @@ export async function planPanelImport(
       .filter((error) => error.rowNumber > 0)
       .map((error) => error.rowNumber),
   );
+  const consentCounts = {
+    surveyContactGranted: 0,
+    surveyContactWithdrawn: 0,
+    surveyContactNoEvidence: 0,
+    panelMembershipGranted: 0,
+    panelMembershipWithdrawn: 0,
+    panelMembershipNoEvidence: 0,
+  };
+  for (const row of validation.valid) {
+    for (const [purpose, grantedKey, withdrawnKey, missingKey] of [
+      ["survey_contact", "surveyContactGranted", "surveyContactWithdrawn", "surveyContactNoEvidence"],
+      ["panel_membership", "panelMembershipGranted", "panelMembershipWithdrawn", "panelMembershipNoEvidence"],
+    ] as const) {
+      const status = row.consents?.[purpose]?.status;
+      if (status === "granted") consentCounts[grantedKey] += 1;
+      else if (status === "withdrawn") consentCounts[withdrawnKey] += 1;
+      else consentCounts[missingKey] += 1;
+    }
+  }
   return {
     validation,
     counts: {
@@ -230,6 +258,7 @@ export async function planPanelImport(
       update: updates.length,
       skippedDuplicates: validation.duplicatesInFile,
       before: Number(panelTotal.count),
+      ...consentCounts,
     },
     creates,
     updates,
@@ -338,24 +367,51 @@ async function updatePanelists(
   }
 }
 
-async function insertCreateConsents(
+async function upsertImportedConsents(
   tx: Tx,
   orgId: string,
-  filename: string,
-  panelistIds: string[],
+  rows: PanelistWrite[],
 ): Promise<void> {
-  for (const group of chunks(panelistIds)) {
+  const evidence = rows.flatMap((row) => Object.entries(row.consents ?? {}).flatMap(([purpose, consent]) => consent
+    ? [{ panelistId: row.id, purpose, consent }]
+    : []));
+  for (const group of chunks(evidence)) {
     await tx`
-      insert into consent_records (
-        org_id, panelist_id, purpose, status, source, granted_at
+      with imported as (
+        select * from unnest(
+          ${group.map((entry) => entry.panelistId)}::uuid[],
+          ${group.map((entry) => entry.purpose)}::text[],
+          ${group.map((entry) => entry.consent.status)}::text[],
+          ${group.map((entry) => entry.consent.grantedAt)}::timestamptz[],
+          ${group.map((entry) => entry.consent.withdrawnAt)}::timestamptz[],
+          ${group.map((entry) => entry.consent.evidenceRef)}::text[]
+        ) as input(panelist_id, purpose, status, granted_at, withdrawn_at, evidence_ref)
+      ), updated as (
+        update consent_records as current
+        set status = imported.status::consent_status,
+            source = imported.evidence_ref,
+            granted_at = coalesce(imported.granted_at, current.granted_at),
+            withdrawn_at = imported.withdrawn_at
+        from imported
+        where current.org_id = ${orgId}
+          and current.panelist_id = imported.panelist_id
+          and current.purpose = imported.purpose
+        returning current.id
       )
-      select
-        ${orgId}, imported.id, purpose.name, 'granted'::consent_status,
-        ${`import:${filename}`}, now()
-      from unnest(${group}::uuid[]) as imported(id)
-      cross join (
-        values ('survey_contact'::text), ('panel_membership'::text)
-      ) as purpose(name)`;
+      insert into consent_records (
+        org_id, panelist_id, purpose, status, source, granted_at, withdrawn_at
+      )
+      select ${orgId}, imported.panelist_id, imported.purpose,
+             imported.status::consent_status, imported.evidence_ref,
+             imported.granted_at, imported.withdrawn_at
+      from imported
+      cross join (select count(*) from updated) as updated_state
+      where not exists (
+        select 1 from consent_records as current
+        where current.org_id = ${orgId}
+          and current.panelist_id = imported.panelist_id
+          and current.purpose = imported.purpose
+      )`;
   }
 }
 
@@ -463,23 +519,20 @@ export async function writePanelImport(
     id: randomUUID(),
     ...fieldsFor(row),
     attributes: row.attributes,
+    consents: row.consents,
     tags: row.tags,
   }));
   const updates: PanelistWrite[] = input.plan.updates.map(({ row, existingId }) => ({
     id: existingId,
     ...fieldsFor(row),
     attributes: row.attributes,
+    consents: row.consents,
     tags: row.tags,
   }));
 
   await insertPanelists(tx, input.orgId, input.batchId, creates);
   await updatePanelists(tx, input.orgId, input.batchId, updates);
-  await insertCreateConsents(
-    tx,
-    input.orgId,
-    input.filename,
-    creates.map((row) => row.id),
-  );
+  await upsertImportedConsents(tx, input.orgId, [...creates, ...updates]);
   await ensureImportedAttributeFields(tx, input.orgId, [...creates, ...updates]);
   await upsertAttributes(tx, input.orgId, [...creates, ...updates]);
   await replaceImportedTags(tx, input.orgId, [...creates, ...updates]);

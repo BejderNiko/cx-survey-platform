@@ -11,8 +11,9 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const uiTheme = process.env.NEXT_PUBLIC_UI_THEME === "modern" ? "modern" : "classic";
   return (
-    <html lang="da" className="h-full antialiased">
+    <html lang="da" className="h-full antialiased" data-ui-theme={uiTheme}>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );

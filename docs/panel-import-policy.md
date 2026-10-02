@@ -20,6 +20,21 @@ Kendte danske og engelske overskrifter normaliseres til panelistfelter. Mellemru
 
 Andre registrerede custom fields matches via deres normaliserede, stabile nøgle. Filen skal være CSV eller XLSX og må højst være 8 MB.
 
+Kendte Preely-rosterfelter mappes også automatisk: `Name` gemmes samlet som `full_name` uden navnesplit; `Zip Code` mappes til postnummer; `Boligtype` og syv `[B2B]`-felter gemmes som custom attributes med stabile keys. Custom fields oprettes ved commit for felter med værdier, også efter organisationsreset. Ikke-genkendte kolonner vises eksplicit i importwizard og tælles som unmappede.
+
+## Samtykke pr. formål
+
+Samtykke importeres kun fra eksplicitte kolonner. `survey_contact` og `panel_membership` er uafhængige; én status udfylder ikke den anden. Brug disse normaliserede kolonnenavne:
+
+| Formål | Status | Oprindelig grant-tid | Tilbagetrækningstid | Dokumentationsreference |
+|---|---|---|---|---|
+| `survey_contact` | `survey_contact_status` | `survey_contact_granted_at` | `survey_contact_withdrawn_at` | `survey_contact_evidence_ref` |
+| `panel_membership` | `panel_membership_status` | `panel_membership_granted_at` | `panel_membership_withdrawn_at` | `panel_membership_evidence_ref` |
+
+Status må være `granted` eller `withdrawn`. Tidsstempler skal være ISO-8601 med offset, fx `2026-07-22T10:30:00+02:00` eller `2026-07-22T08:30:00Z`. `granted` kræver grant-tid og dokumentationsreference, uden tilbagetrækningstid. `withdrawn` kræver tilbagetrækningstid og dokumentationsreference; oprindelig grant-tid kan medsendes. Referencen er et ikke-tomt, opak ID på højst 500 tegn. Indhold eller gyldighed af dokumentation verificeres ikke af importeren.
+
+Udeladte samtykkefelter opretter ingen samtykkepost. Delvist udfyldte eller ugyldige felter afviser rækken. Importens afkrydsning er operatørens bekræftelse af gennemgået dokumentation; den opretter ikke samtykke. Importresultatet viser kun aggregerede tællere for givet, trukket tilbage og uden dokumentation pr. formål.
+
 ## Dubletter
 
 Hvis `external_id` findes, bruges den som dedup-nøgle. Ellers bruges normaliseret `email`. Rækker uden brugbar nøgle afvises. Senere forekomst i samme fil af samme nøgle markeres som dublet.

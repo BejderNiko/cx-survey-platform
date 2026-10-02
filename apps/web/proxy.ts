@@ -13,7 +13,6 @@ const PUBLIC_PREFIXES = [
   "/api/health/readiness",
   "/api/respond",
   "/api/recruit",
-  "/api/import/firecrawl",
   "/_next",
   "/favicon",
 ];

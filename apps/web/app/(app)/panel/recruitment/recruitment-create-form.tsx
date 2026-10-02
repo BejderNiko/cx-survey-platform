@@ -1,10 +1,12 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Button, Input, Label, Select } from "@/components/ui";
 import { createRecruitmentPage } from "./actions";
 
 export function CreateRecruitmentPageForm({ workspaces }: { workspaces: { id: string; name: string }[] }) {
+  const router = useRouter();
   const [name, setName] = useState("");
   const [workspaceId, setWorkspaceId] = useState(workspaces[0]?.id ?? "");
   const [error, setError] = useState<string | null>(null);
@@ -23,18 +25,16 @@ export function CreateRecruitmentPageForm({ workspaces }: { workspaces: { id: st
         </Select>
       </div>
       <Button
+        type="button"
         disabled={pending || !name.trim() || !workspaceId}
         onClick={() =>
           startTransition(async () => {
             setError(null);
             try {
-              await createRecruitmentPage(name, workspaceId);
-            } catch (e) {
-              if (e instanceof Error && !e.message.includes("NEXT_REDIRECT")) {
-                setError("Siden kunne ikke oprettes.");
-                return;
-              }
-              throw e;
+              const id = await createRecruitmentPage(name, workspaceId);
+              router.push(`/panel/recruitment/${id}`);
+            } catch {
+              setError("Siden kunne ikke oprettes. Kontrollér navn, arbejdsområde og database-status.");
             }
           })
         }

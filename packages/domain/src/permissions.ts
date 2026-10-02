@@ -51,7 +51,7 @@ export const ACTIONS = [
   // collaboration
   "comments.create",
   "comments.resolve",
-  // internal product workflow and reporting (owner/administrator only by default)
+  // Internal feedback submission is open to all roles; inbox management stays restricted.
   "feature_requests.view",
   "feature_requests.create",
   "feature_requests.manage",
@@ -79,6 +79,7 @@ const RESEARCH_ACTIONS: Action[] = [
   "distributions.create",
   "followup.manage",
   "analytics.run",
+  "feature_requests.create",
 ];
 
 const MATRIX: Record<Role, ReadonlySet<Action>> = {
@@ -87,6 +88,7 @@ const MATRIX: Record<Role, ReadonlySet<Action>> = {
   researcher: new Set(RESEARCH_ACTIONS),
   panel_manager: new Set([
     ...VIEW_ACTIONS,
+    "feature_requests.create",
     "comments.create",
     "panel.edit",
     "panel.import",
@@ -98,13 +100,14 @@ const MATRIX: Record<Role, ReadonlySet<Action>> = {
   ]),
   analyst: new Set([
     ...VIEW_ACTIONS,
+    "feature_requests.create",
     "comments.create",
     "analytics.run",
     "datasets.create",
     "datasets.export",
     "panel.export",
   ]),
-  viewer: new Set([...VIEW_ACTIONS, "comments.create"]),
+  viewer: new Set([...VIEW_ACTIONS, "comments.create", "feature_requests.create"]),
 };
 
 export function can(role: Role, action: Action): boolean {

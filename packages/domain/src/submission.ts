@@ -239,6 +239,14 @@ function validateAnswerValue(question: Question, value: unknown): string | null 
       if (selected.length > allowed.size || new Set(selected).size !== selected.length) {
         return "contains duplicate or too many options.";
       }
+      if (question.multipleSelectLimit !== undefined && selected.length > question.multipleSelectLimit) {
+        return "select limit cannot be exceeded: choose at most " + question.multipleSelectLimit + ".";
+      }
+      if (question.multipleSelectMinLimit !== undefined
+        && selected.length > 0
+        && selected.length < question.multipleSelectMinLimit) {
+        return "select limit requires at least " + question.multipleSelectMinLimit + " option(s).";
+      }
       return selected.every((id) => allowed.has(id)) ? null : "contains an unknown option.";
     }
     case "ranking": {

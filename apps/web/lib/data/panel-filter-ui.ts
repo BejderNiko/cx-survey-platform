@@ -45,22 +45,34 @@ export async function getPanelFilterUiData(tx: Tx, orgId: string): Promise<{
   ]);
   const observed = new Map<string, string[]>();
   for (const row of observedRows) observed.set(String(row.key), [...(observed.get(String(row.key)) ?? []), String(row.value)]);
-  const optionList = (configured: unknown, values: string[]) => panelFilterOptionValues(configured, values)
+  const optionList = (configured: unknown, fallback: string[] = [], observedValues: string[] = []) => panelFilterOptionValues(fallback, configured, observedValues)
     .sort((left, right) => left.localeCompare(right, "da", { numeric: true }))
     .map((value) => ({ value, label: value }));
+  const defaultOptions: Record<string, string[]> = {
+    uddannelse: ["Folkeskole", "Studentereksamen", "Erhvervsfaglig", "Kort videregående under 3 år", "Mellemlang videregående 3-4 år", "Lang videregående over 4 år", "Ønsker ikke at oplyse"],
+    opvarmningskilde: ["Pillefyr", "Elvarme", "Varmepumpe", "Fjernvarme", "Jordvarme", "Solvarme", "Brændeovn", "Oliefyr", "Naturgas", "Bioenergi"],
+  };
   const fields: PanelFilterUiField[] = [
-    { key: "age", label: "Alder", options: [] },
-    { key: "customer_status", label: "Kunderelation", options: Object.entries(CUSTOMER_STATUS).map(([value, label]) => ({ value, label })) },
+    { key: "age", label: "Age", options: [] },
+    { key: "uddannelse", label: "Education", options: optionList(defaultOptions.uddannelse, []) },
+    { key: "opvarmningskilde", label: "Heating source", options: optionList(defaultOptions.opvarmningskilde, []) },
+    { key: "customer_status", label: "Customer relation", options: Object.entries(CUSTOMER_STATUS).map(([value, label]) => ({ value, label })) },
   ];
   for (const field of customFields) {
     const key = String(field.key);
-    if (["age", "alder"].includes(key.toLocaleLowerCase("da"))) continue;
-    const normalized = key.toLocaleLowerCase("da");
+    const normalized = key.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("da");
+    if (["age", "alder"].includes(normalized)) continue;
+    if (normalized === "uddannelse" || normalized === "opvarmningskilde") {
+      const knownField = fields.find((candidate) => candidate.key === normalized);
+      if (knownField) knownField.options = optionList(field.options, defaultOptions[normalized], observed.get(key) ?? []);
+      continue;
+    }
+    if (normalized === "customer_status" || normalized === "customerstatus") continue;
     fields.push({
-      key: normalized === "uddannelse" ? "uddannelse" : normalized === "opvarmningskilde" ? "opvarmningskilde" : "custom",
+      key: "custom",
       label: String(field.label ?? key),
-      options: optionList(field.options, observed.get(key) ?? []),
-      ...(normalized === "uddannelse" || normalized === "opvarmningskilde" ? {} : { attributeKey: key }),
+      options: optionList(field.options, [], observed.get(key) ?? []),
+      attributeKey: key,
     });
   }
   fields.push({ key: "tag", label: "Tags", options: tagRows.map((row) => ({ value: String(row.name), label: String(row.name) })) });

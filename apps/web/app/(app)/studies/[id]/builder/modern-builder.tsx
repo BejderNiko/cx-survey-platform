@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useTransition, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import {
   INCOMPLETE_LOGIC_CONDITION_MESSAGE,
-  QUESTION_TYPES,
+  AUTHORING_QUESTION_TYPES,
   isIncompleteLogicCondition,
   lt,
   validateInstrument,
@@ -19,8 +19,13 @@ import { SurveyRenderer } from "@/components/survey/renderer";
 import { updateDraft } from "../../actions";
 import { FigmaFramePicker } from "./figma-frame-picker";
 import { StimulusEditor } from "./stimulus-editor";
+import { DraftGenerator } from "./draft-generator";
+import { CommentsPanel, type StudyCommentRow } from "../comments-panel";
+import { commentsForScope, countCommentThreads } from "@/lib/comment-threads";
 
-const OPTION_TYPES = ["single_choice", "multiple_choice", "dropdown", "likert", "ranking"];
+// Likert remains in the instrument schema for published, immutable studies.
+// It is intentionally absent here: new drafts must not create it.
+const OPTION_TYPES = ["single_choice", "multiple_choice", "dropdown", "ranking"];
 
 let uid = 0;
 const nextId = (prefix: string) => `${prefix}${Date.now().toString(36)}${(uid++).toString(36)}`;
@@ -44,6 +49,20 @@ function displayLogicWarningCount(definition: InstrumentDefinition): number {
 
 function conditionOperatorFor(question: Question | undefined): Condition["op"] {
   return question?.type === "multiple_choice" ? "contains" : "eq";
+}
+
+function conditionOperators(question: Question | undefined): Condition["op"][] {
+  if (!question) return ["eq"];
+  const numeric = ["nps", "csat", "ces", "rating", "number"].includes(question.type);
+  if (numeric) return ["eq", "ne", "lt", "lte", "gt", "gte", "answered", "not_answered"];
+  if (["single_choice", "multiple_choice", "dropdown", "likert", "ranking", "consent", "preference_test"].includes(question.type)) {
+    return ["eq", "ne", "in", "not_in", "contains", "answered", "not_answered"];
+  }
+  return ["eq", "ne", "answered", "not_answered"];
+}
+
+function conditionOperatorLabel(op: Condition["op"]): string {
+  return ({ eq: "is", ne: "is not", lt: "less than", lte: "at most", gt: "greater than", gte: "at least", in: "is one of", not_in: "is none of", contains: "contains", answered: "is answered", not_answered: "is not answered" })[op];
 }
 
 function answerChoices(question: Question | undefined, locale: Locale): LogicChoice[] {
@@ -112,6 +131,16 @@ const QUESTION_META: Record<Question["type"], { label: string; hint: string; ton
   prototype_test: { label: "Prototype test", hint: "Capture a consent-aware path through a Figma prototype.", tone: "bg-cyan-100 text-cyan-800" },
 };
 
+function isAuthoringQuestionType(type: Question["type"]): boolean {
+  return (AUTHORING_QUESTION_TYPES as readonly string[]).includes(type);
+}
+
+function questionTypeOptions(currentType?: Question["type"]): Question["type"][] {
+  const types: Question["type"][] = [...AUTHORING_QUESTION_TYPES];
+  if (currentType && !isAuthoringQuestionType(currentType)) types.unshift(currentType);
+  return types;
+}
+
 function makeQuestion(type: Question["type"], existing: Question[]): Question {
   const base = type.replace(/[^a-z]/g, "_");
   let code = base;
@@ -156,26 +185,51 @@ function makeQuestion(type: Question["type"], existing: Question[]): Question {
   };
 }
 
+function cloneQuestion(question: Question, existing: Question[]): Question {
+  const base = `${question.code}_copy`;
+  let code = base;
+  let count = 2;
+  while (existing.some((item) => item.code === code)) code = `${base}_${count++}`;
+  return { ...structuredClone(question), code };
+}
 export function Builder({
   studyId,
   initialTitle,
   initialDefinition,
   previewUrl,
+  initialComments,
+  canResolveComments,
+  currentUserId,
 }: {
   studyId: string;
   initialTitle: string;
   initialDefinition: InstrumentDefinition;
   previewUrl: string;
+  initialComments: StudyCommentRow[];
+  canResolveComments: boolean;
+  currentUserId: string;
 }) {
   const [definition, setDefinition] = useState(initialDefinition);
   const [studyTitle, setStudyTitle] = useState(initialTitle);
+  function changeTitle(value: string) {
+    editRevision.current += 1;
+    setStudyTitle(value);
+    setDirty(true);
+    setSaveMessage(null);
+  }
   const editingLocale: Locale = initialDefinition.defaultLanguage;
   const [sharePreviewUrl, setSharePreviewUrl] = useState(previewUrl);
   const [dirty, setDirty] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile" | null>(null);
   const [pending, startTransition] = useTransition();
-
+  const [saveCycle, setSaveCycle] = useState(0);
+  const editRevision = useRef(0);
+  const latestDraft = useRef({ definition, studyTitle });
+  const saveInFlight = useRef(false);
+  useEffect(() => {
+    latestDraft.current = { definition, studyTitle };
+  }, [definition, studyTitle]);
   const questions = useMemo(() => definition.blocks.flatMap((block) => block.questions), [definition]);
   const questionNumbers = useMemo(() => {
     const numbers = new Map<string, string>();
@@ -190,6 +244,7 @@ export function Builder({
   const incompleteLogicCount = useMemo(() => displayLogicWarningCount(definition), [definition]);
 
   function mutate(change: (draft: InstrumentDefinition) => void) {
+    editRevision.current += 1;
     setDefinition((current) => {
       const copy = structuredClone(current);
       change(copy);
@@ -260,23 +315,70 @@ export function Builder({
     mutate((draft) => { draft.blocks = draft.blocks.filter((item) => item.id !== blockId); });
   }
 
-  function save() {
+  function duplicateQuestion(code: string) {
+    mutate((draft) => {
+      const all = draft.blocks.flatMap((block) => block.questions);
+      const block = draft.blocks.find((item) => item.questions.some((question) => question.code === code));
+      if (!block) return;
+      const index = block.questions.findIndex((question) => question.code === code);
+      if (index < 0) return;
+      block.questions.splice(index + 1, 0, cloneQuestion(block.questions[index], all));
+    });
+  }
+
+  function duplicateBlock(blockId: string) {
+    mutate((draft) => {
+      const index = draft.blocks.findIndex((block) => block.id === blockId);
+      if (index < 0) return;
+      const source = draft.blocks[index];
+      const all = draft.blocks.flatMap((block) => block.questions);
+      const questions: Question[] = [];
+      for (const question of source.questions) {
+        const copy = cloneQuestion(question, [...all, ...questions]);
+        questions.push(copy);
+      }
+      const copy = { ...structuredClone(source), id: nextId("block"), title: { ...(source.title ?? {}), da: `${source.title?.da ?? "Section"} (copy)` }, questions };
+      draft.blocks.splice(index + 1, 0, copy);
+    });
+  }
+  const persistDraft = useCallback((snapshot: InstrumentDefinition, title: string, revision: number) => {
     if (incompleteLogicCount > 0) {
       setSaveMessage(INCOMPLETE_LOGIC_CONDITION_MESSAGE);
       return;
     }
+    if (saveInFlight.current) return;
+    saveInFlight.current = true;
     startTransition(async () => {
       try {
-        const result = await updateDraft(studyId, definition, studyTitle);
-        setDirty(false);
-        setSharePreviewUrl(result.previewUrl);
-        setSaveMessage(result.problems.length === 0 ? "All changes saved" : `Saved with ${result.problems.length} validation warning(s)`);
+        const result = await updateDraft(studyId, snapshot, title);
+        if (editRevision.current === revision) {
+          setDirty(false);
+          setSharePreviewUrl(result.previewUrl);
+          setSaveMessage(result.problems.length === 0 ? "V1 draft saved automatically" : `V1 draft saved with ${result.problems.length} validation warning(s)`);
+        }
       } catch (error) {
-        setSaveMessage(error instanceof Error ? error.message : "Changes could not be saved");
+        if (editRevision.current === revision) setSaveMessage(error instanceof Error ? error.message : "Changes could not be saved");
+      } finally {
+        saveInFlight.current = false;
+        setSaveCycle((current) => current + 1);
       }
     });
+  }, [incompleteLogicCount, startTransition, studyId]);
+
+  function save() {
+    persistDraft(structuredClone(definition), studyTitle, editRevision.current);
   }
 
+  useEffect(() => {
+    if (!dirty || !studyTitle.trim() || incompleteLogicCount > 0) return;
+    const revision = editRevision.current;
+    const timer = window.setTimeout(() => {
+      if (saveInFlight.current) return;
+      const latest = latestDraft.current;
+      persistDraft(structuredClone(latest.definition), latest.studyTitle, revision);
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [dirty, definition, studyTitle, incompleteLogicCount, persistDraft, saveCycle]);
   return (
     <div className="-m-4 min-h-[calc(100vh-3.5rem)] bg-background md:-m-6">
       <header className="sticky top-0 z-30 flex min-h-16 flex-wrap items-center gap-3 bg-transparent px-4 py-3 md:px-6">
@@ -343,9 +445,10 @@ export function Builder({
             <div className="mx-auto max-w-[1080px] space-y-9">
               {problems.length > 0 && <ValidationNotice problems={problems} />}
               <StudyDetails
+                studyId={studyId}
                 title={studyTitle}
                 definition={definition}
-                onTitleChange={(value) => { setStudyTitle(value); setDirty(true); setSaveMessage(null); }}
+                onTitleChange={changeTitle}
                 mutate={mutate}
               />
               <MessageSection
@@ -363,6 +466,9 @@ export function Builder({
                   key={block.id}
                   studyId={studyId}
                   block={block}
+                  comments={initialComments}
+                  canResolveComments={canResolveComments}
+                  currentUserId={currentUserId}
                   blockIndex={blockIndex}
                   locale={editingLocale}
                   allQuestions={questions}
@@ -377,7 +483,9 @@ export function Builder({
                   onAddQuestion={(type) => addQuestion(block.id, type)}
                   onMoveQuestion={(index, direction) => moveQuestion(block.id, index, direction)}
                   onRemoveQuestion={removeQuestion}
+                  onDuplicateQuestion={duplicateQuestion}
                   onRemoveSection={() => removeBlock(block.id)}
+                  onDuplicateSection={() => duplicateBlock(block.id)}
                   canRemoveSection={definition.blocks.length > 1}
                 />
               ))}
@@ -413,6 +521,7 @@ function BuilderSidebar({ definition, locale }: { definition: InstrumentDefiniti
         <a href="#study-details" className="mt-2 flex items-center gap-2 rounded-lg bg-slate-200/70 px-3 py-2.5 text-sm font-semibold text-slate-900">
           <Icon name="details" /> Test details
         </a>
+        <QuestionTypeGuide />
         <div className="my-5 h-px bg-slate-200" />
         <p className="px-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Sections</p>
         <nav aria-label="Study sections" className="mt-2 space-y-1">
@@ -447,6 +556,21 @@ function BuilderSidebar({ definition, locale }: { definition: InstrumentDefiniti
   );
 }
 
+function QuestionTypeGuide() {
+  return (
+    <details className="mt-4 rounded-xl border border-slate-200 bg-white p-3">
+      <summary className="cursor-pointer text-xs font-semibold text-slate-800">Question type guide</summary>
+      <div className="mt-3 space-y-3">
+        {AUTHORING_QUESTION_TYPES.map((type) => (
+          <div key={type}>
+            <p className="text-xs font-semibold text-slate-800">{QUESTION_META[type].label}</p>
+            <p className="mt-0.5 text-[11px] leading-4 text-slate-500">{QUESTION_META[type].hint}</p>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
 function SidebarLink({
   href, label, tone, icon, hidden = false, hiddenCount = 0, drag = false,
 }: {
@@ -516,8 +640,9 @@ function ValidationNotice({ problems }: { problems: string[] }) {
 }
 
 function StudyDetails({
-  title, definition, onTitleChange, mutate,
+  studyId, title, definition, onTitleChange, mutate,
 }: {
+  studyId: string;
   title: string;
   definition: InstrumentDefinition;
   onTitleChange: (value: string) => void;
@@ -539,6 +664,14 @@ function StudyDetails({
             <option value="any">Any device</option><option value="desktop">Desktop</option><option value="mobile">Mobile</option>
           </Select>
         </label>
+        <div className="sm:col-span-2">
+          <StimulusEditor studyId={studyId} kind="context" label="Study context image" value={definition.contextStimulus ?? null}
+            onChange={(asset) => mutate((draft) => { draft.contextStimulus = asset; })}
+            onRemove={() => mutate((draft) => { draft.contextStimulus = undefined; })} />
+        </div>
+        <div className="sm:col-span-2">
+          <DraftGenerator studyId={studyId} onApply={(nextDefinition) => mutate((draft) => { Object.assign(draft, nextDefinition); })} />
+        </div>
       </div>
     </section>
   );
@@ -611,9 +744,77 @@ function SectionHeading({ icon, children, actions }: { icon: IconName; children:
   );
 }
 
+function commentCount(comments: StudyCommentRow[], questionCode?: string, sectionId?: string): number {
+  return countCommentThreads(commentsForScope(comments, { questionCode, sectionId }));
+}
+
+function CommentPopover({
+  studyId,
+  comments,
+  canResolve,
+  currentUserId,
+  label,
+  questionCode,
+  sectionId,
+}: {
+  studyId: string;
+  comments: StudyCommentRow[];
+  canResolve: boolean;
+  currentUserId: string;
+  label: string;
+  questionCode?: string;
+  sectionId?: string;
+}) {
+  const count = commentCount(comments, questionCode, sectionId);
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const closeWhenOutside = (event: PointerEvent) => {
+      if (detailsRef.current?.open && event.target instanceof Node && !detailsRef.current.contains(event.target)) {
+        detailsRef.current.open = false;
+      }
+    };
+    document.addEventListener("pointerdown", closeWhenOutside);
+    return () => document.removeEventListener("pointerdown", closeWhenOutside);
+  }, []);
+  return (
+    <details ref={detailsRef} name="study-comment-popover" className="relative">
+      <summary className="flex h-9 cursor-pointer list-none items-center rounded-md bg-slate-100 px-2 text-xs font-medium text-slate-700 hover:bg-slate-200" aria-label={label}>
+        Comment on{count > 0 ? " · " + count : ""}
+      </summary>
+      <div className="absolute right-0 top-10 z-50 w-[min(440px,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
+        <CommentsPanel
+          studyId={studyId}
+          comments={comments}
+          questionCode={questionCode}
+          sectionId={sectionId}
+          canResolve={canResolve}
+          currentUserId={currentUserId}
+        />
+      </div>
+    </details>
+  );
+}
+function EmptySectionQuestionGuide({ onAdd }: { onAdd: (type: Question["type"]) => void }) {
+  const icons: Record<string, string> = { nps: "⭐", single_choice: "🔘", multiple_choice: "☑️", short_text: "✍️", long_text: "📝", number: "🔢", rating: "⭐", likert: "📊", ranking: "🏆", first_click: "🎯", preference_test: "🖼️", prototype_test: "🧭" };
+  return (
+    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5">
+      <div className="text-center"><span className="text-2xl" aria-hidden>🧩</span><p className="mt-2 text-sm font-semibold">Choose a question type</p><p className="mt-1 text-xs text-slate-500">Each method has a clear use. Click one to add it.</p></div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {AUTHORING_QUESTION_TYPES.map((type) => {
+          const meta = QUESTION_META[type];
+          return <button key={type} type="button" onClick={() => onAdd(type)} className="rounded-lg border border-slate-200 bg-white p-3 text-left transition hover:border-accent hover:shadow-sm"><span className="text-lg" aria-hidden>{icons[type] ?? "✨"}</span><span className="ml-2 text-sm font-semibold text-slate-900">{meta.label}</span><span className="mt-1 block text-[11px] leading-4 text-slate-500">{meta.hint}</span></button>;
+        })}
+      </div>
+    </div>
+  );
+}
+
 function StudySection({
   studyId,
   block,
+  comments,
+  canResolveComments,
+  currentUserId,
   blockIndex,
   locale,
   allQuestions,
@@ -625,11 +826,16 @@ function StudySection({
   onAddQuestion,
   onMoveQuestion,
   onRemoveQuestion,
+  onDuplicateQuestion,
+  onDuplicateSection,
   onRemoveSection,
   canRemoveSection,
 }: {
   studyId: string;
   block: InstrumentDefinition["blocks"][number];
+  comments: StudyCommentRow[];
+  canResolveComments: boolean;
+  currentUserId: string;
   blockIndex: number;
   locale: Locale;
   allQuestions: Question[];
@@ -641,6 +847,8 @@ function StudySection({
   onAddQuestion: (type: Question["type"]) => void;
   onMoveQuestion: (index: number, direction: -1 | 1) => void;
   onRemoveQuestion: (code: string) => void;
+  onDuplicateQuestion: (code: string) => void;
+  onDuplicateSection: () => void;
   onRemoveSection: () => void;
   canRemoveSection: boolean;
 }) {
@@ -657,6 +865,7 @@ function StudySection({
         icon={hasDesign ? "image" : "question"}
         actions={
           <div className="flex items-center gap-2">
+            <CommentPopover studyId={studyId} comments={comments} canResolve={canResolveComments} currentUserId={currentUserId} label="Comment on" sectionId={block.id} />
             <button
               type="button"
               onClick={() => {
@@ -680,6 +889,7 @@ function StudySection({
             <details className="relative">
               <summary className="grid h-9 w-9 cursor-pointer list-none place-items-center rounded-lg text-slate-500 hover:bg-slate-200" aria-label="Section menu"><Icon name="more" /></summary>
               <div className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                <button type="button" onClick={onDuplicateSection} className="w-full rounded-md px-3 py-2 text-left text-xs hover:bg-slate-50">Duplicate section</button>
                 <button type="button" disabled={!canRemoveSection} onClick={onRemoveSection} className="w-full rounded-md px-3 py-2 text-left text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40">Delete section</button>
               </div>
             </details>
@@ -719,25 +929,23 @@ function StudySection({
               locale={locale}
               allQuestions={allQuestions}
               questionNumbers={questionNumbers}
+              comments={comments}
+              canResolveComments={canResolveComments}
+              currentUserId={currentUserId}
               onChange={(patch) => onQuestionChange(question.code, patch)}
               onMoveUp={() => onMoveQuestion(questionIndex, -1)}
               onMoveDown={() => onMoveQuestion(questionIndex, 1)}
               onRemove={() => onRemoveQuestion(question.code)}
+              onDuplicate={() => onDuplicateQuestion(question.code)}
               canMoveUp={questionIndex > 0}
               canMoveDown={questionIndex < block.questions.length - 1}
             />
           ))}
-          {block.questions.length === 0 && (
-            <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center">
-              <span className="mx-auto grid h-10 w-10 place-items-center rounded-xl bg-white text-slate-500 shadow-sm"><Icon name="question" /></span>
-              <p className="mt-3 text-sm font-semibold">No questions in this section</p>
-              <p className="mt-1 text-xs text-slate-500">Choose a question type below.</p>
-            </div>
-          )}
+          {block.questions.length === 0 && <EmptySectionQuestionGuide onAdd={onAddQuestion} />}
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <Select aria-label={`Question type for section ${blockIndex + 1}`} value={newType} onChange={(event) => setNewType(event.target.value as Question["type"])}>
-            {QUESTION_TYPES.map((type) => <option key={type} value={type}>{QUESTION_META[type].label}</option>)}
+            {AUTHORING_QUESTION_TYPES.map((type) => <option key={type} value={type}>{QUESTION_META[type].label}</option>)}
           </Select>
           <Button size="sm" onClick={() => onAddQuestion(newType)}><Icon name="plus" /> Add another question</Button>
           <label className="ml-1 inline-flex items-center gap-2 text-xs text-slate-600">
@@ -750,7 +958,7 @@ function StudySection({
 }
 
 function QuestionCard({
-  studyId, question, number, locale, allQuestions, questionNumbers, onChange, onMoveUp, onMoveDown, onRemove, canMoveUp, canMoveDown,
+  studyId, question, number, locale, allQuestions, questionNumbers, comments, canResolveComments, currentUserId, onChange, onMoveUp, onMoveDown, onRemove, onDuplicate, canMoveUp, canMoveDown,
 }: {
   studyId: string;
   question: Question;
@@ -758,10 +966,14 @@ function QuestionCard({
   locale: Locale;
   allQuestions: Question[];
   questionNumbers: ReadonlyMap<string, string>;
+  comments: StudyCommentRow[];
+  canResolveComments: boolean;
+  currentUserId: string;
   onChange: (patch: Partial<Question>) => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
   onRemove: () => void;
+  onDuplicate: () => void;
   canMoveUp: boolean;
   canMoveDown: boolean;
 }) {
@@ -794,8 +1006,9 @@ function QuestionCard({
           }}
           className="h-9 border-0 bg-slate-50 py-0 text-xs font-medium"
         >
-          {QUESTION_TYPES.map((type) => <option key={type} value={type}>{QUESTION_META[type].label}</option>)}
+          {questionTypeOptions(question.type).map((type) => <option key={type} value={type} disabled={!isAuthoringQuestionType(type)}>{QUESTION_META[type].label}{isAuthoringQuestionType(type) ? "" : " (legacy)"}</option>)}
         </Select>
+        <CommentPopover studyId={studyId} comments={comments} canResolve={canResolveComments} currentUserId={currentUserId} label="Comment on" questionCode={question.code} />
         <QuestionHeaderToolbar
           number={number}
           required={question.required}
@@ -817,6 +1030,7 @@ function QuestionCard({
           onMoveUp={onMoveUp}
           onMoveDown={onMoveDown}
           onRemove={onRemove}
+          onDuplicate={onDuplicate}
           canMoveUp={canMoveUp}
           canMoveDown={canMoveDown}
         />
@@ -837,10 +1051,12 @@ function QuestionCard({
       <div className="mt-4">
         {question.type === "first_click" ? (
           <DesignQuestionBody studyId={studyId} question={question} locale={locale} onChange={onChange} />
+        ) : question.type === "preference_test" ? (
+          <PreferenceQuestionBody studyId={studyId} question={question} locale={locale} onChange={onChange} />
         ) : question.type === "prototype_test" ? (
           <PrototypeQuestionBody studyId={studyId} question={question} locale={locale} onChange={onChange} />
         ) : (
-          <QuestionBody question={question} locale={locale} onChange={onChange} />
+          <QuestionBody studyId={studyId} question={question} locale={locale} onChange={onChange} />
         )}
       </div>
     </article>
@@ -849,7 +1065,7 @@ function QuestionCard({
 
 function QuestionHeaderToolbar({
   number, required, hidden, hasLogic, logicRuleCount, logicOpen,
-  onRequiredChange, onLogicToggle, onHiddenChange, onMoveUp, onMoveDown, onRemove,
+  onRequiredChange, onLogicToggle, onHiddenChange, onMoveUp, onMoveDown, onRemove, onDuplicate,
   canMoveUp, canMoveDown,
 }: {
   number: string;
@@ -864,6 +1080,7 @@ function QuestionHeaderToolbar({
   onMoveUp: () => void;
   onMoveDown: () => void;
   onRemove: () => void;
+  onDuplicate: () => void;
   canMoveUp: boolean;
   canMoveDown: boolean;
 }) {
@@ -896,6 +1113,7 @@ function QuestionHeaderToolbar({
         <div className="absolute right-0 z-20 mt-1 w-40 rounded-lg border border-slate-200 bg-white p-1 text-xs shadow-lg">
           <button type="button" disabled={!canMoveUp} onClick={onMoveUp} className="w-full rounded-md px-3 py-2 text-left hover:bg-slate-50 disabled:opacity-40">Move up</button>
           <button type="button" disabled={!canMoveDown} onClick={onMoveDown} className="w-full rounded-md px-3 py-2 text-left hover:bg-slate-50 disabled:opacity-40">Move down</button>
+          <button type="button" onClick={onDuplicate} className="w-full rounded-md px-3 py-2 text-left hover:bg-slate-50">Duplicate question</button>
           <button type="button" onClick={onRemove} className="w-full rounded-md px-3 py-2 text-left text-red-700 hover:bg-red-50">Delete question</button>
         </div>
       </details>
@@ -903,15 +1121,22 @@ function QuestionHeaderToolbar({
   );
 }
 
-function QuestionBody({ question, locale, onChange }: { question: Question; locale: Locale; onChange: (patch: Partial<Question>) => void }) {
+function QuestionBody({ studyId, question, locale, onChange }: { studyId: string; question: Question; locale: Locale; onChange: (patch: Partial<Question>) => void }) {
   const meta = QUESTION_META[question.type];
   const [helpTextOpen, setHelpTextOpen] = useState(() => Object.values(question.helpText ?? {}).some((value) => Boolean(value?.trim())));
+  const [imageAttachmentOpen, setImageAttachmentOpen] = useState(() => Boolean(question.stimuli?.[0]));
   return (
     <div className="space-y-4">
       <LocalizedField label="Question" hint={meta.hint} locale={locale} value={question.label} onChange={(label) => onChange({ label })} textarea={question.type === "long_text"} />
       <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
         <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-800">Help text</p><p className="mt-0.5 text-[11px] text-slate-500">Show an optional explanation below the question.</p></div><Toggle checked={helpTextOpen} onChange={setHelpTextOpen} aria-label="Enable help text" /></div>
         {helpTextOpen && <div className="mt-3"><LocalizedField label="Help text" locale={locale} value={question.helpText ?? {}} onChange={(helpText) => onChange({ helpText })} placeholder="Optional explanation shown below the question" /></div>}
+      </div>
+      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+        <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-800">Question image</p><p className="mt-0.5 text-[11px] text-slate-500">Optional image shown with question. New images are hidden until enabled.</p></div><Toggle checked={imageAttachmentOpen} onChange={(open) => { setImageAttachmentOpen(open); const existing = question.stimuli?.[0]; if (existing && !open) onChange({ stimuli: [{ ...existing, enabled: false }] }); }} aria-label="Enable question image" /></div>
+        {imageAttachmentOpen && <div className="mt-3"><StimulusEditor studyId={studyId} kind="context" label="Question image" value={question.stimuli?.[0] ?? null}
+          onChange={(asset) => onChange({ stimuli: [asset] })}
+          onRemove={question.stimuli?.length ? () => onChange({ stimuli: undefined }) : undefined} /></div>}
       </div>
       {needsOptions(question.type) && <OptionsEditor question={question} locale={locale} onChange={onChange} />}
       {question.type === "rating" && <ScaleEditor question={question} locale={locale} onChange={onChange} />}
@@ -920,6 +1145,58 @@ function QuestionBody({ question, locale, onChange }: { question: Question; loca
   );
 }
 
+function PreferenceQuestionBody({
+  studyId, question, locale, onChange,
+}: {
+  studyId: string;
+  question: Question;
+  locale: Locale;
+  onChange: (patch: Partial<Question>) => void;
+}) {
+  const stimuli = question.stimuli ?? [];
+  const replaceStimulus = (index: number, asset: NonNullable<Question["stimulus"]>) => {
+    const next = [...stimuli];
+    next[index] = asset;
+    onChange({ stimuli: next });
+  };
+  const removeStimulus = (index: number) => {
+    const next = stimuli.filter((_, itemIndex) => itemIndex !== index);
+    onChange({ stimuli: next.length > 0 ? next : undefined });
+  };
+  return (
+    <div className="space-y-4">
+      <LocalizedField label="Question" hint={QUESTION_META.preference_test.hint} locale={locale} value={question.label} onChange={(label) => onChange({ label })} />
+      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+        <p className="text-xs font-semibold text-slate-800">Preference images</p>
+        <p className="mt-0.5 text-[11px] text-slate-500">Attach 2–8 images. Participants choose one preferred design.</p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {stimuli.map((stimulus, index) => (
+          <StimulusEditor
+            key={stimulus.id}
+            studyId={studyId}
+            kind="preference"
+            optionalVisibility={false}
+            label={`Design ${index + 1}`}
+            value={stimulus}
+            onChange={(asset) => replaceStimulus(index, asset)}
+            onRemove={() => removeStimulus(index)}
+          />
+        ))}
+        {stimuli.length < 8 && (
+          <StimulusEditor
+            studyId={studyId}
+            kind="preference"
+            optionalVisibility={false}
+            label={`Attach design ${stimuli.length + 1}`}
+            value={null}
+            onChange={(asset) => onChange({ stimuli: [...stimuli, asset] })}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
 function DesignQuestionBody({
   studyId, question, locale, onChange,
 }: {
@@ -1133,6 +1410,42 @@ function OptionsEditor({ question, locale, onChange }: { question: Question; loc
           Randomize order of choices
         </label>
       </div>
+      {question.type === "multiple_choice" && (() => {
+        const limitsEnabled = question.multipleSelectMinLimit !== undefined || question.multipleSelectLimit !== undefined;
+        const minimum = question.multipleSelectMinLimit ?? 0;
+        const maximum = question.multipleSelectLimit ?? options.length;
+        return (
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+            <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+              <input
+                type="checkbox"
+                checked={limitsEnabled}
+                onChange={(event) => {
+                  if (event.target.checked) {
+                    onChange({ multipleSelectMinLimit: 1, multipleSelectLimit: Math.max(1, Math.min(3, options.length)) });
+                  } else {
+                    onChange({ multipleSelectMinLimit: undefined, multipleSelectLimit: undefined });
+                  }
+                }}
+              />
+              Set selection limits
+            </label>
+            {limitsEnabled && (
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <label className="block text-xs text-slate-600">
+                  <span className="mb-1 block font-medium">Minimum selections</span>
+                  <Input type="number" min={0} max={Math.max(0, options.length)} value={minimum} onChange={(event) => onChange({ multipleSelectMinLimit: Math.max(0, Math.min(options.length, Number(event.target.value) || 0)) })} />
+                </label>
+                <label className="block text-xs text-slate-600">
+                  <span className="mb-1 block font-medium">Maximum selections</span>
+                  <Input type="number" min={1} max={Math.max(1, options.length)} value={maximum} onChange={(event) => onChange({ multipleSelectLimit: Math.max(1, Math.min(options.length, Number(event.target.value) || 1)) })} />
+                </label>
+                <p className="text-[11px] text-slate-500 sm:col-span-2">Participants can choose between the minimum and maximum. Leave minimum at 0 for an optional choice.</p>
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -1202,7 +1515,7 @@ function DisplayLogicEditor({
       <div>
         {conditions.map((condition, index) => {
           const target = candidates.find((candidate) => candidate.code === condition.questionCode);
-          const operator = conditionOperatorFor(target);
+          const operator = condition.op;
           return (
             <div key={index}>
               {index > 0 && (
@@ -1251,14 +1564,16 @@ function DisplayLogicEditor({
                     </option>
                   ))}
                 </Select>
-                <span className="font-medium text-slate-700">answer {operator === "contains" ? "contains" : "is"}</span>
+                <Select aria-label="Comparison operator" value={operator} onChange={(event) => { const next = structuredClone(conditions); const op = event.target.value as Condition["op"]; next[index].op = op; next[index].value = op === "answered" || op === "not_answered" ? undefined : ""; onChange(next); }} className="h-9 min-w-32 text-xs">
+                  {conditionOperators(target).map((op) => <option key={op} value={op}>{conditionOperatorLabel(op)}</option>)}
+                </Select>
                 <AnswerValueControl
                   target={target}
+                  op={operator}
                   locale={locale}
                   value={condition.value}
                   onChange={(value) => {
                     const next = structuredClone(conditions);
-                    next[index].op = operator;
                     next[index].value = value;
                     onChange(next);
                   }}
@@ -1301,15 +1616,34 @@ function DisplayLogicEditor({
 }
 
 function AnswerValueControl({
-  target, locale, value, onChange,
+  target, op, locale, value, onChange,
 }: {
   target: Question | undefined;
+  op: Condition["op"];
   locale: Locale;
   value: unknown;
   onChange: (value: unknown) => void;
 }) {
+  if (op === "answered" || op === "not_answered") return null;
+  if (target?.type === "rating") {
+    const min = target.scale?.min ?? 1;
+    const max = target.scale?.max ?? 5;
+    return (
+      <Input
+        aria-label="Answer"
+        type="number"
+        min={min}
+        max={max}
+        step="1"
+        value={value === undefined || value === null ? "" : String(value)}
+        placeholder={`${min}–${max}`}
+        onChange={(event) => onChange(event.target.value === "" ? "" : Number(event.target.value))}
+        className="h-9 min-w-32 flex-1 text-xs"
+      />
+    );
+  }
   const choices = answerChoices(target, locale);
-  if (target?.type === "multiple_choice" && choices.length > 0) {
+  if ((target?.type === "multiple_choice" || op === "in" || op === "not_in") && choices.length > 0) {
     return <MultipleAnswerChoice value={value} choices={choices} onChange={onChange} />;
   }
   if (choices.length > 0) {
