@@ -2,16 +2,16 @@
 
 ## Scope and decision
 
-Combine current Production `main` with Preview `Pr13` and the uncommitted feedback, comments, and panel-import work. Keep panel recruitment deferred. Release only after the exact merged candidate passes CI, isolated Preview database migration and browser acceptance, backup/rollback review, and a separate Production approval. No hosted data or configuration has been changed by this plan.
+Combine current Production `main` with Preview `Pr13` and the feedback, comments, and panel-import work. Keep panel recruitment deferred. Release only after the exact merged candidate passes CI, isolated Preview database migration and browser acceptance, backup/rollback review, and a separate Production approval. No hosted data or configuration has been changed by this plan. The review branch is `release/pr13-feedback-20261002`; draft PR [#13](https://github.com/BejderNiko/cx-survey-platform/pull/13) holds the candidate.
 
 ## Ordered gates
 
 1. [x] Identify exact current Vercel deployments, Supabase projects, environment scopes, hosted migration heads, and relevant schema objects without exposing values.
-2. [x] Merge Production and Preview source in a detached local review worktree; resolve conflicts, overlay Luna changes, and check TypeScript plus a fresh local migration sequence.
-3. [ ] Review complete merged diff, eliminate lint findings, and run web/domain unit tests, database/RLS tests, production build, analytics tests, and E2E on the exact candidate SHA in CI.
-4. [ ] Establish backup/restore and rollback compatibility for each hosted database. Obtain migration approval. Apply missing migrations 14–17 to isolated Preview first, then audit schema, RLS, and `/api/health/readiness`.
+2. [x] Merge Production and Preview source in a local review worktree; resolve conflicts, overlay Luna changes, and check TypeScript plus a fresh local migration sequence.
+3. [x] Review merged code and run web/domain unit tests, database/RLS tests, production build, analytics tests, and E2E on candidate `013b0df` in [CI #50](https://github.com/BejderNiko/cx-survey-platform/actions/runs/36995405311): web, analytics, and E2E green; 10/10 Playwright tests passed. Documentation-only follow-up commits must still be checked against their exact SHA.
+4. [ ] Establish backup/restore and rollback compatibility for each hosted database using [`supabase-free-backup-restore-runbook.md`](supabase-free-backup-restore-runbook.md). Obtain migration approval. Apply missing migrations 14–17 to isolated Preview first, then audit schema, RLS, and `/api/health/readiness`.
 5. [ ] Run signed-in Preview browser journeys: feedback from a non-admin; owner inbox; study/section/question/result comments with reload and tenant denial; survey build, publish, distribution, completion, results/export; panel import with synthetic data only.
-6. [ ] Resolve any Preview defects and repeat gates 3–5 until accepted. Obtain explicit authorization for commit/push and Production migration/deployment under project instructions.
+6. [ ] Resolve any Preview defects and repeat gates 3–5 until accepted. Candidate branch commits and pushes were authorized in this session; Production migration and deployment require a separate reviewed decision under project instructions.
 7. [ ] Apply approved Production migration sequence, deploy exact accepted candidate, verify deployment SHA, readiness, auth, feedback, comments, survey and rollback signals. Import real panelists only from usable addresses and verified per-purpose consent evidence.
 
 ## Luna High assignments and acceptance
@@ -31,7 +31,9 @@ Agent results are inputs to the primary review. A local green typecheck or migra
 
 ## Release blockers and open decisions
 
-- Hosted projects have migration IDs 1–13. Local source has 1–17; four pending IDs (`14`, `15`, `16`, `17`). Both hosted projects lack `recruitment_page_questions.source_key` and `comments.section_id`.
+- Hosted projects have migration IDs 1–13. Local source has 1–17; `17 - 13 = 4` pending IDs (`14`, `15`, `16`, `17`). Both hosted projects lack `recruitment_page_questions.source_key` and `comments.section_id`.
 - Local Windows blocks Vitest/Playwright child processes (`spawn EPERM`); review worktree build also cannot resolve the temporary `node_modules` junction with Turbopack. Exact-SHA CI is required.
 - Supplied 3,478-row roster uses `example.invalid` for every email and has no per-row consent references. Await usable contact addresses and evidence covering each purpose before real import.
-- Hosted readiness, analytics identity, restore capability, and rollback compatibility remain unverified. Vercel Ready indicates deployment state only.
+- Both hosted Supabase projects show Free and Dashboard has no scheduled backup. Supabase CLI, Docker, `pg_dump`, and `psql` are unavailable here; no backup or restore test has run. Release gate 4 remains open; follow [`supabase-free-backup-restore-runbook.md`](supabase-free-backup-restore-runbook.md) on an approved machine.
+- CLI SQL exports omit managed `auth` / `storage` schemas and extension-owned objects. Migrations 14–17 alter only application objects in `public`; migration 17 references managed `auth.uid()` and role `authenticated` without changing `auth`. Application login data in `public.users` is included, but Supabase `auth` users, Storage bucket metadata/files, project settings, and Edge Functions are outside this SQL export. Verify separate Storage recovery if rollback needs stimulus/report files.
+- Hosted readiness, analytics identity, restore capability, and rollback compatibility remain unverified. Vercel Ready indicates deployment state only. Both Supabase projects use the Free plan without scheduled database backups; the linked runbook defines a logical export and disposable local restore gate, with Storage object recovery separate.
