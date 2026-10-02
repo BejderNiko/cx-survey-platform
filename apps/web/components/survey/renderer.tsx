@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   allQuestions,
+  logicDrivenProgress,
   lt,
   nextStep,
   recordSubmissionInteraction,
@@ -69,7 +70,6 @@ export function SurveyRenderer({
   }, [definition, locale]);
 
   const questions = useMemo(() => allQuestions(definition).filter((question) => !question.hidden), [definition]);
-  const total = questions.length;
 
   const goNext = useCallback(
     async (fromCode: string | null, currentAnswers: Record<string, unknown>) => {
@@ -107,9 +107,10 @@ export function SurveyRenderer({
   );
 
   const answerValue = current ? answers[current.code] : undefined;
-  const currentContext = current
+  const contextCandidate = current
     ? current.contextOverride === undefined ? definition.contextStimulus : current.contextOverride
     : undefined;
+  const currentContext = contextCandidate?.enabled === true ? contextCandidate : undefined;
 
 
   function isAnswered(q: Question, v: unknown): boolean {
@@ -132,6 +133,14 @@ export function SurveyRenderer({
         [current.code]: (current.options ?? []).map((option) => option.id),
       };
       setAnswers(currentAnswers);
+    }
+    if (current.type === "multiple_choice") {
+      const selected = currentAnswers[current.code];
+      const minimum = current.multipleSelectMinLimit;
+      if (minimum !== undefined && Array.isArray(selected) && selected.length > 0 && selected.length < minimum) {
+        setValidationMsg(locale === "da" ? `Vælg mindst ${minimum} svar.` : `Choose at least ${minimum} options.`);
+        return;
+      }
     }
     if (current.required && !isAnswered(current, currentAnswers[current.code])) {
       setValidationMsg(locale === "da" ? "Dette spørgsmål skal besvares." : "This question requires an answer.");
@@ -162,7 +171,7 @@ export function SurveyRenderer({
   };
 
   const progress = current
-    ? Math.round(((questions.findIndex((q) => q.code === current.code) + 1) / total) * 100)
+    ? logicDrivenProgress(definition, current.code, answers)
     : phase === "done" || phase === "disqualified" ? 100 : 0;
 
   const msg = (key: "intro" | "thankYou" | "disqualified") => lt(definition.messages?.[key], locale);
@@ -213,7 +222,8 @@ export function SurveyRenderer({
               <img
                 src={stimulusUrl(currentContext, assetToken)}
                 alt={currentContext.altText}
-                className="max-h-[70vh] w-full max-w-full object-contain"
+                style={{ width: (currentContext.displayWidthPercent ?? 100) + "%" }}
+                className="max-h-[70vh] max-w-full object-contain"
               />
             </figure>
           )}
@@ -223,6 +233,7 @@ export function SurveyRenderer({
                 {lt(current.label, locale)}
                 {current.required && <span aria-hidden className="text-danger"> *</span>}
               </legend>
+              <QuestionMedia question={current} assetToken={assetToken} />
               {current.helpText && <p className="mt-1 text-sm text-muted">{lt(current.helpText, locale)}</p>}
               <div className="mt-4">
                 <QuestionInput
@@ -309,6 +320,9 @@ function OptionList({
   question: Question; locale: Locale; value: unknown; onChange: (v: unknown) => void; multi: boolean;
 }) {
   const selected = multi ? ((value as string[]) ?? []) : value;
+  const limit = multi ? question.multipleSelectLimit : undefined;
+  const minimum = multi ? question.multipleSelectMinLimit : undefined;
+  const [limitMessage, setLimitMessage] = useState(false);
   return (
     <div className="space-y-1.5">
       {(question.options ?? []).map((opt) => {
@@ -328,6 +342,11 @@ function OptionList({
               onChange={() => {
                 if (multi) {
                   const arr = selected as string[];
+                  if (!checked && limit !== undefined && arr.length >= limit) {
+                    setLimitMessage(true);
+                    return;
+                  }
+                  setLimitMessage(false);
                   onChange(checked ? arr.filter((x) => x !== opt.id) : [...arr, opt.id]);
                 } else {
                   onChange(opt.id);
@@ -338,6 +357,8 @@ function OptionList({
           </label>
         );
       })}
+      {(minimum !== undefined || limit !== undefined) && <p className="text-xs text-muted">{minimum !== undefined && limit !== undefined ? (locale === "da" ? `Vælg mellem ${minimum} og ${limit} svar.` : `Choose between ${minimum} and ${limit} options.`) : minimum !== undefined ? (locale === "da" ? `Vælg mindst ${minimum} svar.` : `Choose at least ${minimum} options.`) : (locale === "da" ? `Vælg højst ${limit} svar.` : `Choose up to ${limit} options.`)}</p>}
+      {limitMessage && <p role="alert" className="text-xs text-danger">{locale === "da" ? `Du kan højst vælge ${limit} svar.` : `You can choose at most ${limit} options.`}</p>}
     </div>
   );
 }
@@ -558,6 +579,7 @@ function QuestionInput({
                   key={stimulus.id}
                   imageUrl={stimulusUrl(stimulus, assetToken)}
                   altText={stimulus.altText}
+                  displayWidthPercent={stimulus.displayWidthPercent}
                   value={stimuli.length === 1 || response?.selectedAssetId === stimulus.assetId ? response : undefined}
                   onClickPoint={(pt, meta) => recordClick(stimulus.assetId, pt, { ...meta, stimulusIndex: index })}
                 />
@@ -592,10 +614,11 @@ function QuestionInput({
 }
 
 function FirstClickImage({
-  imageUrl, altText, value, onClickPoint,
+  imageUrl, altText, displayWidthPercent, value, onClickPoint,
 }: {
   imageUrl: string;
   altText: string;
+  displayWidthPercent?: number;
   value: { x: number; y: number } | undefined;
   onClickPoint: (pt: { x: number; y: number }, meta: Record<string, unknown>) => void;
 }) {
@@ -607,13 +630,14 @@ function FirstClickImage({
   const [display, setDisplay] = useState<{ x: number; y: number } | null>(null);
 
   return (
-    <div className="relative inline-block max-w-full">
+    <div className="relative block w-full">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         ref={imgRef}
         src={imageUrl}
         alt={altText}
-        className="max-w-full cursor-crosshair rounded-md border border-line"
+        style={{ width: `${displayWidthPercent ?? 100}%` }}
+        className="block max-w-full cursor-crosshair rounded-md border border-line"
         onClick={(e) => {
           const img = imgRef.current;
           if (!img) return;
@@ -707,7 +731,8 @@ function PreferenceInput({
             <img
               src={stimulusUrl(stimulus, assetToken)}
               alt={stimulus.altText}
-              className="h-48 w-full max-w-full object-contain"
+              style={{ width: `${stimulus.displayWidthPercent ?? 100}%` }}
+              className="h-48 max-w-full object-contain"
             />
             <span className={cn("mt-2 block text-sm", selected ? "font-semibold text-accent" : "text-muted")}>
               {selected ? "Valgt" : "Vælg dette billede"}
@@ -715,6 +740,27 @@ function PreferenceInput({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+function QuestionMedia({ question, assetToken }: { question: Question; assetToken?: string }) {
+  if (["first_click", "preference_test", "prototype_test"].includes(question.type)) return null;
+  const stimuli = (question.stimuli ?? []).filter((asset) => asset.enabled === true);
+  if (stimuli.length === 0) return null;
+  return (
+    <div className="mt-3 space-y-3" aria-label="Question image">
+      {stimuli.map((asset) => (
+        <figure key={asset.id} className="overflow-hidden rounded-lg border border-line bg-background p-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={stimulusUrl(asset, assetToken)}
+            alt={asset.altText}
+            className="h-auto max-w-full rounded object-contain"
+            style={{ width: `${asset.displayWidthPercent ?? 100}%` }}
+          />
+        </figure>
+      ))}
     </div>
   );
 }

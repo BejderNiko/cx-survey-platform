@@ -55,4 +55,12 @@ describe("permission policy", () => {
     expect(can("researcher", "comments.resolve")).toBe(true);
     expect(can("viewer", "comments.resolve")).toBe(false);
   });
+
+  it("allows every internal role to submit feedback without granting inbox management", () => {
+    for (const role of ["owner", "administrator", "researcher", "panel_manager", "analyst", "viewer"] as const) {
+      expect(can(role, "feature_requests.create")).toBe(true);
+    }
+    expect(can("viewer", "feature_requests.view")).toBe(false);
+    expect(can("viewer", "feature_requests.manage")).toBe(false);
+  });
 });

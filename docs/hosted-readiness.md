@@ -13,7 +13,7 @@ Code cannot guarantee 100% uptime. Availability depends on Vercel, Supabase, ana
 - Analytics: FastAPI deployment over HTTPS.
 - Local-only database: PGlite. Hosted Preview/Production rejects PGlite and loopback targets.
 
-`GET /api/health/readiness` returns only readiness booleans. It checks mandatory hosted configuration, database connectivity, and protected analytics details. It returns HTTP 503 if any dependency is unavailable. It never returns connection strings, keys, host details, or exception text.
+`GET /api/health/readiness` returns readiness booleans. It checks hosted configuration, database connectivity, and protected analytics details. Top-level status is `ready`, `degraded`, or `not_ready`. `database.ready` and `database.studiesReady` cover study core access. `database.complete` additionally requires section-scoped comments, recruitment pages, and `recruitment_page_questions` shape/constraint/index readiness. A degraded response keeps study core available while naming missing additive schema capabilities. It returns HTTP 503 only when core dependencies are unavailable. It never returns connection strings, keys, host details, or exception text.
 
 ## Environment-variable roles
 
@@ -25,8 +25,6 @@ Code cannot guarantee 100% uptime. Availability depends on Vercel, Supabase, ana
 | `APP_BASE_URL` | web server → public links | public config | Exact HTTPS origin in Preview/Production. |
 | `ANALYTICS_URL` | web server → FastAPI | server config | HTTPS origin in Preview/Production. No localhost fallback. |
 | `ANALYTICS_API_SECRET` | web server → FastAPI | shared server secret | Same value on matching web/analytics environment; at least 32 random bytes; different between staging and production. |
-| `IMPORT_API_SECRET` | approved caller → import route | server secret | Authenticates caller to OK route. Not Firecrawl credential. |
-| `FIRECRAWL_API_KEY` | import route → Firecrawl | provider secret | Authenticates OK route to Firecrawl. Not route secret. |
 | `NEXT_PUBLIC_SUPABASE_URL` | browser → Supabase | public config | Used when Supabase Auth cutover is active. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | browser → Supabase | public key | Safe only with correct RLS. Never service role. |
 | `SUPABASE_SERVICE_ROLE_KEY` | narrow server path → Supabase API | highly privileged server secret | Bypasses RLS. Never browser-visible and never substituted for a PostgreSQL URL. |

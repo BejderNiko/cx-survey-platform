@@ -6,6 +6,7 @@ import { withAuthorized } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import type { Tx } from "@/lib/db";
 import { checkFile, parseImportFile } from "@/lib/import/parse";
+import { normalizeImportColumn, resolveImportConfig } from "@/lib/import/column-map";
 import {
   completePanelImport,
   failPanelImport,
@@ -15,65 +16,22 @@ import {
   writePanelImport,
   type PanelImportCounts,
 } from "@/lib/import/panel-commit";
-import type { DedupRule, ImportMapping } from "@/lib/import/validate";
 
-/** Fixed import policy: first known column wins; custom fields use exact normalized keys. */
-const DEFAULT_COLUMN_MAP: Record<string, string> = {
-  external_id: "external_id", externalid: "external_id", ekstern_id: "external_id", kunde_id: "external_id", kundenummer: "external_id", customer_id: "external_id", id: "external_id",
-  first_name: "first_name", firstname: "first_name", fornavn: "first_name",
-  last_name: "last_name", lastname: "last_name", efternavn: "last_name",
-  email: "email", mail: "email", e_mail: "email", emailadresse: "email",
-  phone: "phone", telefon: "phone", mobile: "phone",
-  language: "language", sprog: "language", locale: "language",
-  birth_year: "birth_year", birthyear: "birth_year", foedselsaar: "birth_year",
-  gender: "gender", koen: "gender",
-  city: "city", by: "city",
-  postal_code: "postal_code", zip: "postal_code", postnummer: "postal_code",
-  country: "country", land: "country",
-  customer_status: "customer_status", status: "customer_status",
-  recruitment_source: "recruitment_source", source: "recruitment_source",
-  tags: "tags", tag: "tags", labels: "tags",
-};
-
-const DEFAULT_ATTRIBUTE_MAP: Record<string, string> = {
-  age: "attr:age", alder: "attr:age",
-  joined_date: "attr:joined_date", joineddate: "attr:joined_date",
-  last_test_date: "attr:last_test_date", lasttestdate: "attr:last_test_date",
-  tests_completed: "attr:tests_completed", testscompleted: "attr:tests_completed",
-  uddannelse: "attr:uddannelse", education: "attr:uddannelse",
-  arbejdsstatus: "attr:arbejdsstatus", employment_status: "attr:arbejdsstatus",
-  bopael: "attr:bopael", residence: "attr:bopael",
-  bil: "attr:bil", car: "attr:bil",
-  opvarmningskilde: "attr:opvarmningskilde", heating_source: "attr:opvarmningskilde",
-  undersoegelsesformer: "attr:undersoegelsesformer", survey_formats: "attr:undersoegelsesformer",
-  produkter_og_kunde_hos_ok: "attr:produkter_og_kunde_hos_ok", products_and_customer_at_ok: "attr:produkter_og_kunde_hos_ok",
-  type_af_mobiltelefon: "attr:type_af_mobiltelefon", mobile_phone_type: "attr:type_af_mobiltelefon",
-  boligtype: "attr:boligtype", housing_type: "attr:boligtype",
-  baeredygtigere_stroem: "attr:baeredygtigere_stroem", sustainable_power: "attr:baeredygtigere_stroem",
-};
-function normalizeColumn(column: string): string {
-  return column.trim().toLowerCase()
-    .replace(/æ/g, "ae").replace(/ø/g, "oe").replace(/å/g, "aa")
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_");
+function previewRows(rows: Record<string, string>[]): Record<string, string>[] {
+  return rows.slice(0, 8).map((row) => Object.fromEntries(
+    Object.entries(row).map(([column, value]) => [
+      column,
+      /^(survey_contact|panel_membership)_(consent_)?evidence_ref$/i.test(normalizeImportColumn(column))
+        ? "[reference hidden]"
+        : value,
+    ]),
+  ));
 }
 
 async function fixedImportConfig(tx: Tx, orgId: string, columns: string[]) {
   const customFields = await tx`
     select key from custom_fields where org_id = ${orgId} order by key`;
-  const customKeys = new Set(customFields.map((field) => String(field.key)));
-  const usedTargets = new Set<string>();
-  const mapping: ImportMapping = {};
-  for (const column of columns) {
-    const normalized = normalizeColumn(column);
-    const target = DEFAULT_COLUMN_MAP[normalized]
-      ?? DEFAULT_ATTRIBUTE_MAP[normalized]
-      ?? (customKeys.has(normalized) ? `attr:${normalized}` : "");
-    mapping[column] = target && !usedTargets.has(target) ? target : "";
-    if (mapping[column]) usedTargets.add(mapping[column]);
-  }
-  const dedupRule: DedupRule = usedTargets.has("external_id") ? "external_id" : "email";
-  return { mapping, dedupRule };
+  return resolveImportConfig(columns, customFields.map((field) => String(field.key)));
 }
 
 async function fileFromForm(formData: FormData): Promise<{ buffer: Buffer; name: string }> {
@@ -85,15 +43,18 @@ async function fileFromForm(formData: FormData): Promise<{ buffer: Buffer; name:
 }
 
 export async function parseStep(formData: FormData) {
-  return withAuthorized("panel.import", async () => {
+  return withAuthorized("panel.import", async (tx, session) => {
     const { buffer, name } = await fileFromForm(formData);
     const sheet = (formData.get("sheet") as string) || undefined;
     const parsed = await parseImportFile(buffer, name, sheet);
+    const config = await fixedImportConfig(tx, session.orgId, parsed.columns);
     return {
       filename: name,
       columns: parsed.columns,
-      preview: parsed.rows.slice(0, 8),
+      preview: previewRows(parsed.rows),
       rowCount: parsed.meta.rowCount,
+      mappedColumnCount: Object.values(config.mapping).filter(Boolean).length,
+      unmappedColumns: config.unmappedColumns,
       sheetNames: parsed.sheetNames ?? null,
       delimiter: parsed.meta.delimiter ?? null,
     };
@@ -107,14 +68,13 @@ function fileFingerprint(buffer: Buffer): string {
 function samePlanCounts(stored: Record<string, unknown>, current: PanelImportCounts): boolean {
   const keys: (keyof PanelImportCounts)[] = [
     "total", "valid", "invalid", "create", "update", "skippedDuplicates", "before",
+    "surveyContactGranted", "surveyContactWithdrawn", "surveyContactNoEvidence",
+    "panelMembershipGranted", "panelMembershipWithdrawn", "panelMembershipNoEvidence",
   ];
   return keys.every((key) => Number(stored[key]) === current[key]);
 }
 
-function failureMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : "Importen fejlede.";
-  return message.slice(0, 1000);
-}
+const IMPORT_COMMIT_FAILURE_MESSAGE = "Importen kunne ikke gennemføres. Kontroller filen og prøv igen.";
 
 export async function dryRunStep(formData: FormData) {
   const consentConfirmed = formData.get("consentConfirmed") === "true";
@@ -261,8 +221,8 @@ export async function commitStep(formData: FormData) {
     revalidatePath("/panel");
     revalidatePath("/panel/import");
     return result;
-  } catch (error) {
-    const message = failureMessage(error);
+  } catch {
+    const message = IMPORT_COMMIT_FAILURE_MESSAGE;
     try {
       await withAuthorized("panel.import", async (tx, session) => {
         const failed = await failPanelImport(tx, {
@@ -282,11 +242,10 @@ export async function commitStep(formData: FormData) {
         }
       });
     } catch {
-      // Keep original commit failure. Database outage can also prevent durable
-      // failure finalization; caller still receives controlled failure text.
+      // Database outage can also prevent durable failure finalization.
     }
     revalidatePath("/panel/import");
-    throw error;
+    throw new Error(message);
   }
 }
 

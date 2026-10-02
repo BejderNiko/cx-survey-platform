@@ -11,7 +11,7 @@ Use one private GitHub monorepo and two Vercel projects:
 | `ok-cx-web` | `apps/web` | Node 22 / Next.js 16 | UI, server actions, respondent API |
 | `ok-cx-analytics` | `apps/analytics` | Python 3.12 / FastAPI | Statistics, SAV/CSV/XLSX/JSON adapters |
 
-Use two Supabase projects: staging and production. Web server calls analytics over HTTPS with `ANALYTICS_API_SECRET`. Browser never receives database admin URL, Supabase service key, import API secret, Firecrawl key, or analytics secret.
+Use two Supabase projects: staging and production. Web server calls analytics over HTTPS with `ANALYTICS_API_SECRET`. Browser never receives database admin URL, Supabase service key, or analytics secret.
 
 Two Vercel projects give independent runtimes, secrets, scaling, logs, and rollback. Vercel supports monorepo root directories and Git previews; its Python runtime supports FastAPI. See [Vercel monorepos](https://vercel.com/docs/monorepos), [Git deployments](https://vercel.com/docs/git), and [Python runtime](https://vercel.com/docs/functions/runtimes/python).
 
@@ -142,16 +142,12 @@ Set environment values. Preview must point to staging services; production must 
 | `APP_BASE_URL` | config | exact Vercel/custom URL used in invitation links |
 | `ANALYTICS_URL` | config | matching analytics project HTTPS origin |
 | `ANALYTICS_API_SECRET` | secret | same value as matching analytics environment |
-| `IMPORT_API_SECRET` | secret | required only if Firecrawl import route is enabled |
-| `FIRECRAWL_API_KEY` | secret | provider key; different role from import route secret |
 | `NEXT_PUBLIC_SUPABASE_URL` | browser-visible config | set during Supabase Auth cutover |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | browser-visible public key | set during Supabase Auth cutover; not service role |
 | `SUPABASE_SERVICE_ROLE_KEY` | highly privileged secret | set server-side only if cutover code uses it |
 
 Do not confuse keys:
 
-- `IMPORT_API_SECRET` authenticates caller to OK import route.
-- `FIRECRAWL_API_KEY` authenticates OK route to Firecrawl.
 - `ANALYTICS_API_SECRET` authenticates web server to analytics service.
 - Supabase anon key is browser-safe only with correct RLS; service-role key bypasses RLS and must remain server-only.
 
@@ -216,7 +212,6 @@ Vercel notes rollback restores previous deployment configuration but not later e
 - [ ] Entra/Supabase Auth replaces demo password login.
 - [ ] Preview uses no production data or secrets.
 - [ ] Analytics details endpoint requires bearer; secrets differ by environment.
-- [ ] Firecrawl route secret and provider key separated.
 - [ ] Production build and 375 px respondent journey pass.
 - [ ] GDPR/DPIA, retention, processor agreements, and access ownership approved.
 - [ ] Backup/restore and code rollback drills recorded.

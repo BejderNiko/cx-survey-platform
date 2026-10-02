@@ -15,10 +15,10 @@ export function NavLink({ href, children, icon, compact }: {
       href={href}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "flex items-center gap-2.5 rounded-lg text-sm transition-colors duration-100",
+        "relative flex items-center gap-2.5 rounded-lg text-sm transition-colors duration-100",
         compact ? "px-2.5 py-1 whitespace-nowrap" : "px-3 py-2",
         active
-          ? "bg-accent-soft font-medium text-accent"
+          ? "bg-accent-soft font-medium text-accent before:absolute before:-left-3 before:top-0 before:h-full before:w-1 before:rounded-r-full before:bg-accent"
           : "text-foreground/80 hover:bg-accent-soft/50 hover:text-foreground",
       )}
     >

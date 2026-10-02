@@ -136,8 +136,13 @@ export function ImportWizard({ history }: { history: Batch[] }) {
             {STATUS_TEXT[status]}
           </Badge>
           {file && <span className="text-sm">{file.name} · {formatBytes(file.size)}</span>}
-          {parsed && <span className="text-sm text-muted">{parsed.rowCount} rækker · {parsed.columns.length} kolonner</span>}
+          {parsed && <span className="text-sm text-muted">{parsed.rowCount} rækker · {parsed.mappedColumnCount}/{parsed.columns.length} kolonner mappet</span>}
         </div>
+        {parsed && parsed.unmappedColumns.length > 0 && (
+          <p role="alert" className="mt-3 text-sm text-danger">
+            Disse kolonner importeres ikke: {parsed.unmappedColumns.join(", ")}. Tilpas filens kolonneoverskrifter før import.
+          </p>
+        )}
 
         <label className="mt-4 flex items-start gap-2 text-sm">
           <input
@@ -145,10 +150,10 @@ export function ImportWizard({ history }: { history: Batch[] }) {
             checked={consentConfirmed}
             onChange={(event) => setConsentConfirmed(event.target.checked)}
           />
-          <span>Jeg bekræfter, at kontakterne har et gyldigt samtykkegrundlag til undersøgelseskontakt.</span>
+          <span>Jeg har gennemgået samtykkedokumentationen for filen. Denne bekræftelse opretter ikke samtykkeposter.</span>
         </label>
         <p className="mt-1 text-xs text-muted">
-          Mapping og dubletkontrol sker automatisk. Eksternt id bruges først; ellers bruges e-mail. Samtykke kan ikke springes over.
+          Mapping og dubletkontrol sker automatisk. Eksternt id bruges først; ellers bruges e-mail. Samtykke importeres kun fra særskilte felter for hvert formål. Manglende samtykkefelter giver ingen ny tilladelse til kontakt eller medlemskab.
         </p>
 
         <Button className="mt-4" disabled={!file || !parsed || !consentConfirmed || pending} onClick={runImport}>
@@ -158,6 +163,7 @@ export function ImportWizard({ history }: { history: Batch[] }) {
         {result && (
           <p role="status" className="mt-3 text-sm text-success">
             Databasecommit bekræftet: {result.counts.before} før + {result.counts.create} oprettet = {result.counts.after} efter · {result.counts.update} opdateret · {result.counts.invalid} ugyldige.
+            <br />Samtykke: kontakt {result.counts.surveyContactGranted ?? 0} givet, {result.counts.surveyContactWithdrawn ?? 0} trukket tilbage, {result.counts.surveyContactNoEvidence ?? 0} uden dokumentation; medlemskab {result.counts.panelMembershipGranted ?? 0} givet, {result.counts.panelMembershipWithdrawn ?? 0} trukket tilbage, {result.counts.panelMembershipNoEvidence ?? 0} uden dokumentation.
             {result.errorCount > 0 && (
               <> <a className="underline" href={`/api/import-batches/${result.batchId}/errors`}>Hent fejlrapport</a>.</>
             )}

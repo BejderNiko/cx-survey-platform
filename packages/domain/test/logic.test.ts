@@ -5,7 +5,7 @@ import {
   validateInstrument,
   type InstrumentDefinition,
 } from "../src/instrument";
-import { evaluateCondition, nextStep, visiblePath } from "../src/logic";
+import { evaluateCondition, logicDrivenProgress, nextStep, visiblePath } from "../src/logic";
 
 const def: InstrumentDefinition = instrumentDefinition.parse({
   languages: ["da", "en"],
@@ -197,6 +197,17 @@ describe("survey logic engine", () => {
     expect(visiblePath(conditional, { screener: "yes", nps_score: 10 })).not.toContain("section_followup");
   });
 
+  it("uses numeric linear-scale comparisons at boundary values", () => {
+    const answer = { scale: 5 };
+    expect(evaluateCondition({ questionCode: "scale", op: "eq", value: 5 }, answer)).toBe(true);
+    expect(evaluateCondition({ questionCode: "scale", op: "gt", value: 5 }, answer)).toBe(false);
+    expect(evaluateCondition({ questionCode: "scale", op: "gte", value: 5 }, answer)).toBe(true);
+    expect(evaluateCondition({ questionCode: "scale", op: "lt", value: 5 }, answer)).toBe(false);
+    expect(evaluateCondition({ questionCode: "scale", op: "lte", value: 5 }, answer)).toBe(true);
+    expect(evaluateCondition({ questionCode: "scale", op: "gte", value: 5 }, { scale: "" })).toBe(false);
+    expect(evaluateCondition({ questionCode: "scale", op: "gte", value: 5 }, { scale: "not a number" })).toBe(false);
+  });
+
   it("flags incomplete display conditions before save or publish", () => {
     const bad = structuredClone(def);
     bad.blocks[0].questions[2].visibleIf = [
@@ -215,3 +226,8 @@ describe("survey logic engine", () => {
     expect(validateInstrument(bad)).toContain("Display condition on 'b2' must reference an earlier question.");
   });
 });
+
+  it("calculates progress from the logic-driven respondent path", () => {
+    expect(logicDrivenProgress(def, "promoter_why", { screener: "yes", nps_score: 10 })).toBe(75);
+    expect(logicDrivenProgress(def, "detractor_why", { screener: "yes", nps_score: 2 })).toBe(60);
+  });

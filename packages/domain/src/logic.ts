@@ -146,3 +146,17 @@ export function visiblePath(def: InstrumentDefinition, answers: AnswerMap): stri
   }
   return path;
 }
+
+/** Progress based on the path currently implied by answers, not raw question count. */
+export function logicDrivenProgress(
+  def: InstrumentDefinition,
+  currentCode: string | null,
+  answers: AnswerMap,
+): number {
+  if (!currentCode) return 0;
+  const path = visiblePath(def, answers);
+  const currentIndex = path.indexOf(currentCode);
+  if (currentIndex < 0) return 0;
+  const denominator = Math.max(path.length, currentIndex + 1);
+  return Math.min(100, Math.round(((currentIndex + 1) / denominator) * 100));
+}

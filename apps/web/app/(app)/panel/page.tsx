@@ -149,6 +149,9 @@ export default async function PanelPage({ searchParams }: { searchParams: Promis
 
   const totalPages = Math.max(1, Math.ceil(data.filtered / PAGE_SIZE));
   const currentPage = data.page;
+  const exportParams = new URLSearchParams();
+  for (const [key, value] of Object.entries(sp)) if (value && key !== "page") exportParams.set(key, value);
+  const exportHref = `/api/panel/export?${exportParams.toString()}`;
   const pageHref = (targetPage: number) => {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(sp)) if (value) params.set(key, value);
@@ -161,6 +164,7 @@ export default async function PanelPage({ searchParams }: { searchParams: Promis
     <div className="mx-auto max-w-[1500px] space-y-5">
       <PageHeader title="Panel" description={String(data.filtered) + " panelister matcher de aktive filtre"} actions={<>
         <LinkButton href="/panel/recruitment">Rekruttering</LinkButton>
+        {can(session.role, "panel.export") && <LinkButton href={exportHref}>Eksportér CSV</LinkButton>}
         {can(session.role, "panel.import") && <LinkButton href="/panel/import" variant="primary">Importér</LinkButton>}
       </>} />
       <PanelFilterPanel key={sp.filters ?? "no-filters"} fields={data.filterFields} messages={data.messages} initialFilters={asClientFilters(filters)}

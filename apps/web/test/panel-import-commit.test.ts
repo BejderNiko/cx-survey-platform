@@ -8,6 +8,7 @@ import {
   startPanelImportCommit,
   writePanelImport,
 } from "@/lib/import/panel-commit";
+import { applyGovernance } from "@/lib/data/panel";
 import type { ImportMapping } from "@/lib/import/validate";
 import { adminDb, appDb, asUser } from "./helpers/db";
 
@@ -224,8 +225,16 @@ describe("panel import database commit", () => {
              (select count(*)::int from panelist_attributes a
               where a.org_id = ib.org_id) as attributes
       from import_batches ib where ib.id = ${firstBatchId}`;
-    expect(firstEvidence).toMatchObject({ status: "committed", linked: 3_478, consents: 6_956, attributes: 3_478 });
+    expect(firstEvidence).toMatchObject({ status: "committed", linked: 3_478, consents: 0, attributes: 3_478 });
     expect(firstEvidence.committed_at).toBeTruthy();
+
+    const [firstPanelist] = await admin`select id from panelists where org_id = ${orgId} and external_id = ${rows[0].external_id}`;
+    const eligibility = await asUser(app, userId, orgId, (tx) => applyGovernance(
+      tx,
+      [firstPanelist.id as string],
+      { contactCooldownDays: 14, maxInviteSize: 500, monthlyContactCap: 2 },
+    ));
+    expect(eligibility).toMatchObject({ eligible: [], excluded: [{ reason: "no_consent" }] });
 
     const secondBatchId = await createCommittingBatch("bulk-repeat.csv");
     const updatedRows = rows.map((row) => ({ ...row, first_name: `${row.first_name} opdateret` }));
@@ -253,8 +262,104 @@ describe("panel import database commit", () => {
     expect(afterRepeat).toEqual({ total: 3_478, updated: 3_478 });
     const [consents] = await admin`
       select count(*)::int as count from consent_records where org_id = ${orgId}`;
-    expect(consents.count).toBe(6_956);
+    expect(consents.count).toBe(0);
   }, 60_000);
+
+  it("imports per-purpose consent evidence and updates withdrawn consent idempotently", async () => {
+    const consentMap: ImportMapping = {
+      external_id: "external_id",
+      email: "email",
+      Name: "attr:full_name",
+      "Zip Code": "postal_code",
+      Boligtype: "attr:boligtype",
+      "[B2B] CVR-nummer": "attr:b2b_cvr_nummer",
+      "[B2B] Antal medarbejdere": "attr:b2b_antal_medarbejdere",
+      contact_status: "consent:survey_contact.status",
+      contact_granted_at: "consent:survey_contact.granted_at",
+      contact_withdrawn_at: "consent:survey_contact.withdrawn_at",
+      contact_evidence: "consent:survey_contact.evidence_ref",
+      member_status: "consent:panel_membership.status",
+      member_granted_at: "consent:panel_membership.granted_at",
+      member_withdrawn_at: "consent:panel_membership.withdrawn_at",
+      member_evidence: "consent:panel_membership.evidence_ref",
+    };
+    const id = `CONSENT-${randomUUID()}`;
+    const initial = {
+      external_id: id,
+      email: `${id.toLowerCase()}@example.invalid`,
+      Name: "Synthetic Full Name",
+      "Zip Code": "0007",
+      Boligtype: "Synthetic Apartment",
+      "[B2B] CVR-nummer": "00000000",
+      "[B2B] Antal medarbejdere": "1-5",
+      contact_status: "granted",
+      contact_granted_at: "2026-07-22T10:30:00+02:00",
+      contact_withdrawn_at: "",
+      contact_evidence: "consent-register:unit-test",
+      member_status: "",
+      member_granted_at: "",
+      member_withdrawn_at: "",
+      member_evidence: "",
+    };
+    const firstBatch = await createCommittingBatch("consent-create.csv");
+    const [panelistId] = await asUser(app, userId, orgId, async (tx) => {
+      const plan = await planPanelImport(tx, orgId, [initial], consentMap, "external_id");
+      expect(plan.counts).toMatchObject({ surveyContactGranted: 1, panelMembershipNoEvidence: 1 });
+      await writePanelImport(tx, { orgId, batchId: firstBatch, filename: "consent-create.csv", plan });
+      return tx`select id from panelists where org_id = ${orgId} and external_id = ${id}`;
+    });
+    const [granted] = await admin`
+      select purpose, status, source, granted_at, withdrawn_at from consent_records
+      where org_id = ${orgId} and panelist_id = ${panelistId.id}`;
+    expect(granted).toMatchObject({
+      purpose: "survey_contact",
+      status: "granted",
+      source: "consent-register:unit-test",
+      withdrawn_at: null,
+    });
+    expect(new Date(granted.granted_at as Date).toISOString()).toBe("2026-07-22T08:30:00.000Z");
+    const importedFields = await admin`
+      select cf.key
+      from custom_fields cf
+      join panelist_attributes pa on pa.field_id = cf.id and pa.org_id = cf.org_id
+      where cf.org_id = ${orgId} and pa.panelist_id = ${panelistId.id}`;
+    expect(importedFields.map((field) => field.key).sort()).toEqual([
+      "b2b_antal_medarbejdere", "b2b_cvr_nummer", "boligtype", "full_name",
+    ]);
+    const [postalCode] = await admin`
+      select postal_code from panelists where id = ${panelistId.id} and org_id = ${orgId}`;
+    expect(postalCode.postal_code).toBe("0007");
+
+    const withdrawn = {
+      ...initial,
+      contact_status: "withdrawn",
+      contact_granted_at: "",
+      contact_withdrawn_at: "2026-07-23T13:00:00-04:00",
+      contact_evidence: "withdrawal-register:unit-test",
+    };
+    const secondBatch = await createCommittingBatch("consent-withdraw.csv");
+    await asUser(app, userId, orgId, async (tx) => {
+      const plan = await planPanelImport(tx, orgId, [withdrawn], consentMap, "external_id");
+      expect(plan.counts).toMatchObject({ update: 1, surveyContactWithdrawn: 1, panelMembershipNoEvidence: 1 });
+      await writePanelImport(tx, { orgId, batchId: secondBatch, filename: "consent-withdraw.csv", plan });
+    });
+    const [afterRepeat] = await admin`
+      select count(*)::int as count,
+             min(status::text) as status,
+             min(source) as source,
+             min(granted_at) as granted_at,
+             min(withdrawn_at) as withdrawn_at
+      from consent_records where org_id = ${orgId} and panelist_id = ${panelistId.id} and purpose = 'survey_contact'`;
+    expect(afterRepeat).toMatchObject({ count: 1, status: "withdrawn", source: "withdrawal-register:unit-test" });
+    expect(new Date(afterRepeat.granted_at as Date).toISOString()).toBe("2026-07-22T08:30:00.000Z");
+    expect(new Date(afterRepeat.withdrawn_at as Date).toISOString()).toBe("2026-07-23T17:00:00.000Z");
+    const afterEligibility = await asUser(app, userId, orgId, (tx) => applyGovernance(
+      tx,
+      [panelistId.id as string],
+      { contactCooldownDays: 14, maxInviteSize: 500, monthlyContactCap: 2 },
+    ));
+    expect(afterEligibility).toMatchObject({ eligible: [], excluded: [{ reason: "no_consent" }] });
+  });
 
   it("keeps tenant deduplication scoped to the selected organization", async () => {
     const foreignPlan = await asUser(app, otherUserId, otherOrgId, (tx) => planPanelImport(
