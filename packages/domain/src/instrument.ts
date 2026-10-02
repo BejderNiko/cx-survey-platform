@@ -306,7 +306,7 @@ export function validateInstrument(def: InstrumentDefinition): string[] {
       problems.push(`First-click question '${q.code}' is missing a stimulus image.`);
     }
     if (q.type === "preference_test" && (!q.stimuli || q.stimuli.length < 2 || q.stimuli.length > 8)) {
-      problems.push(`Preference test '${q.code}' needs between 2 and 8 images.`);
+      problems.push(`Præferencetesten '${q.code}' skal have mellem 2 og 8 billeder.`);
     }
     if (q.type === "prototype_test") {
       if (!q.prototype) problems.push(`Prototype test '${q.code}' is missing Figma configuration.`);
