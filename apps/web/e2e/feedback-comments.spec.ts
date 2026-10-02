@@ -39,8 +39,12 @@ test("viewer can create feedback and study comment, then reload and verify both 
   test.skip(!isLocalE2E(), "Writes and cleanup are limited to a local E2E database.");
   const requestTitle = `E2E feedback ${randomUUID()}`;
   const commentBody = `E2E study comment ${randomUUID()}`;
+  const sectionCommentBody = `E2E section comment ${randomUUID()}`;
+  const questionCommentBody = `E2E question comment ${randomUUID()}`;
+  const replyBody = `E2E section reply ${randomUUID()}`;
   const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, prepare: false });
   let commentId: string | null = null;
+  const scopedCommentBodies = [sectionCommentBody, questionCommentBody];
 
   try {
     await page.goto("/login");
@@ -61,6 +65,8 @@ test("viewer can create feedback and study comment, then reload and verify both 
     await page.getByRole("button", { name: "Add to feature requests" }).click();
     await expect(page.getByRole("status")).toHaveText("Feedback added to feature requests.");
 
+    const studyPath = await page.locator("article").filter({ hasText: "Relationel NPS 2026 H2" }).getByRole("link", { name: "Åbn studie" }).getAttribute("href");
+    expect(studyPath).toBeTruthy();
     const ownerPage = await browser.newPage();
     try {
       await ownerPage.goto("/login");
@@ -71,6 +77,52 @@ test("viewer can create feedback and study comment, then reload and verify both 
       await ownerPage.goto("/feature-requests");
       await ownerPage.getByRole("searchbox", { name: "Search feature requests" }).fill(requestTitle);
       await expect(ownerPage.locator("article").filter({ hasText: requestTitle })).toContainText("Disposable local end-to-end feedback record.");
+
+      await ownerPage.goto(`${studyPath}/builder`);
+      const commentTriggers = ownerPage.locator('summary[aria-label="Comment on"]');
+      await expect(commentTriggers).toHaveCount(6);
+      await commentTriggers.nth(0).click();
+      await expect(ownerPage.getByText("Section discussion")).toBeVisible();
+      await ownerPage.getByRole("textbox", { name: "New comment" }).fill(sectionCommentBody);
+      await ownerPage.getByRole("button", { name: "Send", exact: true }).click();
+      const sectionPopover = ownerPage.locator('details[name="study-comment-popover"]').nth(0);
+      const sectionThread = sectionPopover.locator("li[id^='comment-thread-']").filter({ hasText: sectionCommentBody });
+      await expect(sectionThread).toBeVisible();
+
+      await sectionThread.getByRole("button", { name: "Reply" }).click();
+      await ownerPage.getByRole("textbox", { name: "Reply" }).fill(replyBody);
+      await ownerPage.getByRole("button", { name: "Send reply" }).click();
+      await expect(sectionThread).toContainText(replyBody);
+      await sectionThread.getByRole("button", { name: "Mark as resolved" }).click();
+      await expect(sectionThread.getByText("Resolved", { exact: true })).toBeVisible();
+
+      await ownerPage.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+      await sectionThread.getByRole("button", { name: "Copy link" }).click();
+      await expect(ownerPage.getByText("Thread link copied.", { exact: true })).toBeVisible();
+      const threadLink = await ownerPage.evaluate(() => navigator.clipboard.readText());
+      expect(threadLink).toContain("#comment-thread-");
+      await ownerPage.goto(threadLink);
+      await expect(ownerPage.locator("li[id^='comment-thread-']").filter({ hasText: sectionCommentBody })).toBeVisible();
+
+      await ownerPage.goto(`${studyPath!}/builder`);
+      const questionPopover = ownerPage.locator('details[name="study-comment-popover"]').nth(1);
+      await questionPopover.locator("summary[aria-label='Comment on']").click();
+      await expect(questionPopover.getByText(/^Question .* discussion$/)).toBeVisible();
+      await questionPopover.getByRole("textbox", { name: "New comment" }).fill(questionCommentBody);
+      await questionPopover.getByRole("button", { name: "Send", exact: true }).click();
+      const questionThread = questionPopover.locator("li[id^='comment-thread-']").filter({ hasText: questionCommentBody });
+      await expect(questionThread).toBeVisible();
+      await expect(questionPopover.locator("li[id^='comment-thread-']").filter({ hasText: sectionCommentBody })).toHaveCount(0);
+      await ownerPage.reload();
+      const reloadedQuestionPopover = ownerPage.locator('details[name="study-comment-popover"]').nth(1);
+      await reloadedQuestionPopover.locator("summary[aria-label='Comment on']").click();
+      await expect(reloadedQuestionPopover.locator("li[id^='comment-thread-']").filter({ hasText: questionCommentBody })).toBeVisible();
+      const reloadedCommentTriggers = ownerPage.locator('summary[aria-label="Comment on"]');
+      await expect(reloadedCommentTriggers).toHaveCount(6);
+      const reloadedSectionPopover = ownerPage.locator('details[name="study-comment-popover"]').nth(0);
+      await reloadedCommentTriggers.nth(0).click();
+      await expect(reloadedSectionPopover.locator("li[id^='comment-thread-']").filter({ hasText: sectionCommentBody })).toBeVisible();
+      await expect(reloadedSectionPopover.locator("li[id^='comment-thread-']").filter({ hasText: questionCommentBody })).toHaveCount(0);
     } finally {
       await ownerPage.close();
     }
@@ -81,8 +133,6 @@ test("viewer can create feedback and study comment, then reload and verify both 
     await expect(page.getByText("Drag to select UI area · Escape to cancel")).toHaveCount(0);
     await page.getByRole("button", { name: "Close" }).click();
 
-    const studyPath = await page.getByRole("link", { name: "Åbn studie" }).first().getAttribute("href");
-    expect(studyPath).toBeTruthy();
     await page.goto(studyPath!);
     await expect(page.getByRole("heading", { name: "Comments" })).toBeVisible();
     await expect(page.getByText("Study discussion")).toBeVisible();
@@ -102,6 +152,8 @@ test("viewer can create feedback and study comment, then reload and verify both 
     await filters.getByRole("button", { name: /^Open/ }).click();
     await expect(filters.getByRole("button", { name: /^Open/ })).toHaveAttribute("aria-pressed", "true");
   } finally {
+    await admin`delete from comments where parent_id in (select id from comments where body in ${admin(scopedCommentBodies)})`;
+    await admin`delete from comments where body in ${admin(scopedCommentBodies)}`;
     if (commentId) await admin`delete from comments where id = ${commentId}`;
     await admin`delete from comments c using users u where c.author_id = u.id and u.email = 'viewer@example.invalid' and c.body = ${commentBody}`;
     await admin`delete from feature_request_events where feature_request_id in (select id from feature_requests where title = ${requestTitle})`;
