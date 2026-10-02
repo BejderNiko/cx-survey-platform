@@ -114,15 +114,21 @@ describe("import validation", () => {
   });
 
   it("rejects incomplete, unsupported, and malformed consent evidence without echoing values", () => {
+    const evidenceSentinels = [
+      "private-doc-token-x1",
+      "private-doc-token-x2",
+      "private-doc-token-x3",
+      "private-doc-token-x4",
+    ];
     const res = validateRows([
-      { ID: "X1", Email: "a@example.invalid", ContactStatus: "granted", ContactGrantedAt: "2026-07-22T10:30:00", ContactEvidence: "ref" },
-      { ID: "X2", Email: "b@example.invalid", ContactStatus: "granted", ContactGrantedAt: "2026-02-30T10:30:00Z", ContactEvidence: "ref" },
-      { ID: "X3", Email: "c@example.invalid", ContactStatus: "expired", ContactGrantedAt: "2026-07-22T10:30:00Z", ContactEvidence: "ref" },
-      { ID: "X4", Email: "d@example.invalid", ContactEvidence: "ref-without-status" },
+      { ID: "X1", Email: "a@example.invalid", ContactStatus: "granted", ContactGrantedAt: "2026-07-22T10:30:00", ContactEvidence: evidenceSentinels[0] },
+      { ID: "X2", Email: "b@example.invalid", ContactStatus: "granted", ContactGrantedAt: "2026-02-30T10:30:00Z", ContactEvidence: evidenceSentinels[1] },
+      { ID: "X3", Email: "c@example.invalid", ContactStatus: "expired", ContactGrantedAt: "2026-07-22T10:30:00Z", ContactEvidence: evidenceSentinels[2] },
+      { ID: "X4", Email: "d@example.invalid", ContactEvidence: evidenceSentinels[3] },
       { ID: "X5", Email: "e@example.invalid", ContactStatus: "withdrawn", ContactWithdrawnAt: "2026-07-22T10:30:00Z", ContactEvidence: "" },
     ], consentMapping, "external_id");
     expect(res.valid).toHaveLength(0);
     expect(res.errors).toHaveLength(5);
-    expect(res.errors.every((error) => !error.message.includes("ref"))).toBe(true);
+    expect(res.errors.every((error) => evidenceSentinels.every((value) => !error.message.includes(value)))).toBe(true);
   });
 });
